@@ -19,18 +19,19 @@ export function pageToStrip(target, x, y) {
   return { fx: (x - target.x) / target.w, fy: (y - target.y) / target.h };
 }
 
-const clamp01 = (v, size) => Math.min(1 - size, Math.max(0, v));
+// keep a span of `size` within 0..max
+const clampSpan = (v, size, max = 1) => Math.min(max - size, Math.max(0, v));
 
 /**
  * The target that a strip of stripW x stripH pixels shows at `zoom`,
  * centred on (cx, cy) where it fits. The target has the strip's shape,
  * so ink is never stretched.
  */
-export function targetFor({ stripW, stripH, pageW, pageH, zoom, cx, cy }) {
+export function targetFor({ stripW, stripH, pageW, pageH, zoom, cx, cy, xmax = 1 }) {
   // never wider or taller than the page: on a narrow page, magnify more
-  const k = Math.max(zoom, stripW / pageW, stripH / pageH);
+  const k = Math.max(zoom, stripW / (pageW * xmax), stripH / pageH);
   const w = stripW / k / pageW, h = stripH / k / pageH;
-  return { x: clamp01(cx - w / 2, w), y: clamp01(cy - h / 2, h), w, h };
+  return { x: clampSpan(cx - w / 2, w, xmax), y: clampSpan(cy - h / 2, h), w, h };
 }
 
 /** How many strip pixels one page pixel occupies. */
@@ -42,12 +43,12 @@ export function magnification(target, stripW, pageW) {
  * Move the target along as writing fills it: `step` is 'right', 'left'
  * or 'line'. Stepping right off the edge of the page starts a new line.
  */
-export function advance(target, step, { overlap = 0.25, margin = 0.04 } = {}) {
+export function advance(target, step, { overlap = 0.25, margin = 0.04, xmax = 1 } = {}) {
   const stride = target.w * (1 - overlap);
-  const line = () => ({ ...target, x: clamp01(margin, target.w), y: clamp01(target.y + target.h * 0.85, target.h) });
+  const line = () => ({ ...target, x: clampSpan(margin, target.w, xmax), y: clampSpan(target.y + target.h * 0.85, target.h) });
 
   if (step === 'line') return line();
-  if (step === 'left') return { ...target, x: clamp01(target.x - stride, target.w) };
-  if (target.x + target.w >= 1 - 1e-9) return line();
-  return { ...target, x: clamp01(target.x + stride, target.w) };
+  if (step === 'left') return { ...target, x: clampSpan(target.x - stride, target.w, xmax) };
+  if (target.x + target.w >= xmax - 1e-9) return line();
+  return { ...target, x: clampSpan(target.x + stride, target.w, xmax) };
 }

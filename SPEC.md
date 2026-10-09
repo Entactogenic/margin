@@ -275,8 +275,8 @@ thumbs: key -> Blob                  // first-page PNG, ~320px wide
 
 ## Aim 4 — Feel like a native app
 
-**Status: Step 1 done and confirmed on the iPad. Step 2 built, awaiting iPad
-testing. Steps 3–4 not started.**
+**Status: Steps 1 and 2 done and confirmed on the iPad. Step 3 built, awaiting
+iPad testing. Step 4 not started — ask first.**
 
 Make Margin feel like Notability or GoodNotes on an iPad: the pen draws, fingers
 scroll and pinch, and nothing lags or loses work.
@@ -339,7 +339,7 @@ carries no manifest or service worker.
    7 days without a visit unless it is on the Home Screen — the note says so
    when the library is at risk.
 
-### Step 2 — Feel upgrades — *built, awaiting iPad testing*
+### Step 2 — Feel upgrades — *done, confirmed on the iPad*
 
 #### 4.2a Undo and redo gestures
 
@@ -411,21 +411,110 @@ everything after that is the ordinary stroke path.
 5. Undo, the eraser, shapes and scratch-out all work in the strip. The box
    survives a zoom or rotation and closes when the document changes.
 
-### Step 3 — Document handling — *not started*
+### Step 3 — Document handling — *built, awaiting iPad testing*
 
-- **4.3a** Page thumbnail sidebar with tap-to-jump.
-- **4.3b** Render only pages near the viewport, so a 200-page PDF opens quickly.
-- **4.3c** Blank pages and paper templates (lined, grid, dotted), insertable
-  between PDF pages or as standalone notebooks.
-- **4.3d** Extra margin space beside PDF pages for notes.
-- **4.3e** Text boxes for typed notes.
-- **4.3f** Search the PDF's text via the pdf.js text layer; highlighter snaps
-  to text lines.
-- **4.3g** Backup export and import: one file with all documents and notes.
+#### The page model
 
-Acceptance criteria to be written when Step 3 starts. 4.3c–4.3e change what a
-page is and what an annotation is, so they need the storage schema settled
-first.
+Step 3 changes what a page is, so the model comes first. It is in
+`src/pages.js`, and nothing already stored had to change shape.
+
+- A document has a **layout**, `{ order, blanks, margin }`, kept in its `docs`
+  record. `order` lists page ids top to bottom.
+- A PDF page's id is its page number; a blank page's id is a string (`'b1'`).
+  Strokes are stored per page id, so a PDF page's notes stay under its page
+  number exactly as before, and **inserting a blank page renumbers nothing**.
+- Coordinates stay normalized to the page itself. With a margin, x runs past 1:
+  ink in the margin is ink at x = 1.2. Nothing is rescaled when the margin is
+  turned on or off.
+- A typed note is an item in the page's stroke list, `{ k: 'text', w, text,
+  pts }`, where `w` is the font size and `pts` the outline of its box. Having
+  points and a width, it is erased, lassoed, moved, resized, undone and saved
+  by the code that already does those things for ink.
+- A notebook is a document with no PDF: zero bytes, and a layout of blank pages.
+- `repairLayout()` makes any stored layout safe to render. Call it on load.
+
+#### 4.3a Page thumbnail sidebar
+
+1. Lists every page, in order, and marks the one on screen.
+2. Tapping a thumbnail jumps to that page.
+3. Paints only the thumbnails in view; a page's thumbnail picks up new ink.
+
+#### 4.3b Render only pages near the viewport
+
+Every page gets a correctly sized placeholder at once; an
+`IntersectionObserver` gives canvases to the pages within a screen and a half
+of the viewport and takes them away again. Pages are assumed to match the
+first until each is measured.
+
+1. A 200-page PDF shows its first page in well under two seconds.
+2. Paging through the whole document never holds more than a handful of
+   canvases.
+3. Ink on a page that was released is there when it comes back.
+4. Scroll position, search hits and the thumbnail sidebar do not depend on a
+   page being mounted.
+
+#### 4.3c Blank pages, paper templates, notebooks
+
+1. *+ Page* inserts a blank page after the one on screen: plain, lined, grid
+   or dotted. PDF pages keep their numbers and their notes.
+2. Rulings are crisp on screen and are drawn into the exported PDF from the
+   same geometry (`paperMarks()`).
+3. Only blank pages can be deleted; a document always keeps one page.
+   Deleting takes the page's ink with it, and one undo restores both.
+4. Inserting and deleting pages undo and redo like any other edit.
+5. *New notebook* in the library makes a document of blank pages with no PDF.
+   It saves, reopens, gets a thumbnail, and exports as a PDF.
+
+#### 4.3d Margin
+
+1. *Margin* adds 40% of the page's width as writing space to the right of
+   every page in the document.
+2. Ink there is stored past x = 1; ink on the page keeps its coordinates.
+3. The lasso and the zoom box can reach into the margin, and no further.
+4. Export widens every page by the margin.
+5. Turning the margin off hides the notes in it without deleting them, and
+   says so. It is an undoable edit.
+
+#### 4.3e Text boxes
+
+1. With the *Text* tool, a tap opens a box to type in; tapping away commits
+   it; `Esc` abandons it. Tapping an existing note edits it.
+2. Committing is one undo step. Emptying a note deletes it.
+3. A note wraps to its box, and the box is as tall as the wrapped text.
+4. It can be erased, lassoed, moved, resized (the font scales) and recoloured.
+5. Export sets it as real, selectable text. **Limit:** the exported PDF uses
+   the built-in Helvetica, which covers Western European characters only;
+   anything else is exported as "?". On screen all characters display.
+
+#### 4.3f Search, and the highlighter on text
+
+`src/search.js`. Text comes from the pdf.js text layer.
+
+1. Search finds every match in the document, page by page, showing hits as
+   they are found; `Enter` and the arrows step through them and scroll to
+   each. `Ctrl/Cmd+F` focuses the box; `Esc` clears it.
+2. Matching ignores case and all whitespace, so a phrase is found even where
+   the PDF split it across text runs, dropped its spaces, or broke a word at
+   a line end.
+3. A highlighter stroke drawn along a line of PDF text becomes a flat band
+   over exactly that line, keeping the extent that was swept.
+4. A highlighter stroke anywhere else — over a figure, down the page, on a
+   blank page — is left as drawn.
+
+#### 4.3g Backup and restore
+
+`src/backup.js`. One file, a small binary container (not JSON: the PDFs are
+most of it).
+
+1. *Back up* in the library saves every document, its layout, notes and
+   thumbnail as one file. *Restore* reads it back, byte for byte.
+2. Restoring never overwrites silently: documents not yet in the library are
+   added; if some are already there, it asks whether to replace them or keep
+   what is here.
+3. A file that is not a backup, or is cut short, is refused and nothing
+   changes.
+4. **Limit:** a backup is built in memory, so it needs roughly the library's
+   size in free memory. Fine for hundreds of megabytes; not tested beyond.
 
 ### Step 4 — Later — *do not start without asking*
 
@@ -475,9 +564,16 @@ src/
   store.js              IndexedDB: notes, docs, thumbs
   export.js             pdf-lib stamping
   library.js            document library            (Aim 3)
+  pages.js              page layout: blank pages, margin, paper    (Aim 4.3)
+  search.js             text search, highlighter snapping          (Aim 4.3f)
+  backup.js             whole-library backup file                  (Aim 4.3g)
+  history.js            undo and redo                              (Aim 4.2a)
+  gestures.js           taps, resting pen                          (Aim 4.2)
   tools/
     pencil.js           grain rendering             (Aim 1a)
     shapes.js           drag-to-place shapes        (Aim 1b)
+    lasso.js  scratch.js  zoombox.js                (Aim 4.2)
+    text.js             typed notes                 (Aim 4.3e)
 tests/
   cleanup.test.mjs
   store.test.mjs

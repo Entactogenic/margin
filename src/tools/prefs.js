@@ -17,9 +17,10 @@ export const PALETTES = {
   pencil: PEN_COLORS,
   highlight: HI_COLORS,
   shape: PEN_COLORS,
+  text: PEN_COLORS,
 };
 
-export const TOOLS = ['pen', 'pencil', 'highlight', 'shape', 'erase', 'select'];
+export const TOOLS = ['pen', 'pencil', 'highlight', 'shape', 'erase', 'select', 'text'];
 export const SHAPES = ['rect', 'ellipse', 'line', 'arrow'];
 const ERASERS = ['stroke', 'area'];
 export const WEIGHT_MIN = 0.55, WEIGHT_MAX = 1.9;
@@ -34,6 +35,7 @@ export function defaultPrefs() {
       pencil: { c: '--pen-4', w: 1 },
       highlight: { c: '--hi-1', w: 1 },
       shape: { c: '--pen-2', w: 1 },
+      text: { c: '--pen-4', w: 1 },
     },
   };
 }

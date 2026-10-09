@@ -27,6 +27,7 @@
     <div class="grp">
       <button class="tb" id="lib" aria-pressed="false" title="Documents kept in this browser">Library</button>
       <label class="file">Open PDF<input type="file" id="file" accept="application/pdf"></label>
+      <button class="tb" id="pages" aria-pressed="false" title="Page thumbnails, blank pages and the margin">Pages</button>
     </div>
 
     <div class="grp">
@@ -36,6 +37,7 @@
       <button class="tb" id="t-shape" aria-pressed="false" title="Drag to place a shape; hold Shift to constrain (4)">Shape</button>
       <button class="tb" id="t-erase" aria-pressed="false" title="Erase (5)">Erase</button>
       <button class="tb" id="t-select" aria-pressed="false" title="Circle strokes to move, resize, recolor, copy, level or delete them (6)">Lasso</button>
+      <button class="tb" id="t-text" aria-pressed="false" title="Tap to type a note; tap a note to edit it (7)">Text</button>
     </div>
 
     <div class="grp" id="opts" hidden></div>
@@ -67,12 +69,34 @@
       <button class="tb" id="export" title="Save an annotated copy">Export</button>
     </div>
 
+    <div class="grp find">
+      <input type="search" id="find" placeholder="Find in PDF" aria-label="Find in the PDF's text" autocomplete="off" spellcheck="false">
+      <span class="stat" id="find-count" aria-live="polite"></span>
+      <button class="tb" id="find-prev" aria-label="Previous match" disabled>&lsaquo;</button>
+      <button class="tb" id="find-next" aria-label="Next match" disabled>&rsaquo;</button>
+    </div>
+
     <span class="spacer"></span>
     <span class="stat" id="stat">no document</span>
   </div>
 
   <div class="main" id="main">
-    <div id="stage"></div>
+    <div class="work">
+      <aside class="side" id="side" aria-label="Pages" hidden>
+        <div class="side-head">
+          <select id="paper" aria-label="Paper for new pages">
+            <option value="plain">Plain</option>
+            <option value="lined">Lined</option>
+            <option value="grid">Grid</option>
+            <option value="dotted">Dotted</option>
+          </select>
+          <button class="tb" id="side-add" title="Add a blank page after the one on screen">+ Page</button>
+          <button class="tb" id="side-margin" aria-pressed="false" title="Extra writing space to the right of every page">Margin</button>
+        </div>
+        <ul id="side-list"></ul>
+      </aside>
+      <div id="stage"></div>
+    </div>
 
     <div class="strip" id="strip" hidden>
       <canvas id="strip-canvas" aria-label="Zoom writing box"></canvas>
@@ -90,6 +114,17 @@
         <span class="stat lib-count"></span>
         <span class="stat lib-storage" id="lib-storage"></span>
         <span class="spacer"></span>
+        <span class="lib-acts">
+          <select id="lib-paper" aria-label="Paper for a new notebook">
+            <option value="lined">Lined</option>
+            <option value="plain">Plain</option>
+            <option value="grid">Grid</option>
+            <option value="dotted">Dotted</option>
+          </select>
+          <button class="tb" id="lib-new" title="A document of blank pages, with no PDF">New notebook</button>
+          <button class="tb" id="lib-backup" title="Save every document and all your notes as one file">Back up</button>
+          <label class="file" title="Bring documents and notes back from a backup file">Restore<input type="file" id="lib-restore"></label>
+        </span>
         <label class="lib-sortby">Sort by
           <select class="lib-sort">
             <option value="opened">Last opened</option>

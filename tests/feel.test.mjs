@@ -14,73 +14,74 @@ import { rng, gauss, box, letter, lineOf } from './helpers.mjs';
 /* ---------------------------------------------------------------- */
 
 const ink = (id) => ({ k: 'pen', id, pts: [{ x: 0.1, y: 0.1 }, { x: 0.2, y: 0.2 }] });
-const ids = (strokes, page = 1) => (strokes[page] ?? []).map((s) => s.id).join('');
+const ids = (doc, page = 1) => (doc.strokes[page] ?? []).map((s) => s.id).join('');
+const newDoc = () => ({ strokes: {}, layout: { order: [1, 2, 3], blanks: {}, margin: 0 } });
 
-function draw(h, strokes, id, page = 1) {
-  h.record(strokes, page);
-  (strokes[page] ??= []).push(ink(id));
+function draw(h, doc, id, page = 1) {
+  h.record(doc, page);
+  (doc.strokes[page] ??= []).push(ink(id));
 }
 
 test('undo then redo returns the page to exactly where it was', () => {
-  const h = createHistory(), strokes = {};
-  draw(h, strokes, 'a'); draw(h, strokes, 'b'); draw(h, strokes, 'c');
-  const full = JSON.stringify(strokes);
+  const h = createHistory(), doc = newDoc();
+  draw(h, doc, 'a'); draw(h, doc, 'b'); draw(h, doc, 'c');
+  const full = JSON.stringify(doc);
 
-  assert.equal(h.undo(strokes), 1);
-  assert.equal(h.undo(strokes), 1);
-  assert.equal(ids(strokes), 'a');
-  assert.equal(h.redo(strokes), 1);
-  assert.equal(ids(strokes), 'ab');
-  h.redo(strokes);
-  assert.equal(JSON.stringify(strokes), full);
+  assert.deepEqual(h.undo(doc), { page: 1, layout: false });
+  h.undo(doc);
+  assert.equal(ids(doc), 'a');
+  assert.deepEqual(h.redo(doc), { page: 1, layout: false });
+  assert.equal(ids(doc), 'ab');
+  h.redo(doc);
+  assert.equal(JSON.stringify(doc), full);
   assert.equal(h.canRedo, false);
-  assert.equal(h.redo(strokes), null);
+  assert.equal(h.redo(doc), null);
 });
 
 test('a new edit forgets what could have been redone', () => {
-  const h = createHistory(), strokes = {};
-  draw(h, strokes, 'a'); draw(h, strokes, 'b');
-  h.undo(strokes);
+  const h = createHistory(), doc = newDoc();
+  draw(h, doc, 'a'); draw(h, doc, 'b');
+  h.undo(doc);
   assert.equal(h.canRedo, true);
-  draw(h, strokes, 'x');
+  draw(h, doc, 'x');
   assert.equal(h.canRedo, false);
-  assert.equal(ids(strokes), 'ax');
+  assert.equal(ids(doc), 'ax');
 });
 
 test('a tap that leaves no ink does not cost the redo stack', () => {
-  const h = createHistory(), strokes = {};
-  draw(h, strokes, 'a'); draw(h, strokes, 'b');
-  h.undo(strokes);
-  h.record(strokes, 1); // pen touches down...
-  h.discard();          // ...and lifts without drawing
+  const h = createHistory(), doc = newDoc();
+  draw(h, doc, 'a'); draw(h, doc, 'b');
+  h.undo(doc);
+  h.record(doc, 1); // pen touches down...
+  h.discard();      // ...and lifts without drawing
   assert.equal(h.canRedo, true);
-  h.redo(strokes);
-  assert.equal(ids(strokes), 'ab');
-  h.undo(strokes); h.undo(strokes);
+  h.redo(doc);
+  assert.equal(ids(doc), 'ab');
+  h.undo(doc); h.undo(doc);
   assert.equal(h.canUndo, false);
 });
 
 test('history works across pages and is bounded', () => {
-  const h = createHistory(5), strokes = {};
-  draw(h, strokes, 'a', 1); draw(h, strokes, 'b', 2);
-  assert.equal(h.undo(strokes), 2);
-  assert.equal(ids(strokes, 1), 'a');
-  assert.equal(ids(strokes, 2), '');
-  assert.equal(h.redo(strokes), 2);
+  const h = createHistory(5), doc = newDoc();
+  draw(h, doc, 'a', 1); draw(h, doc, 'b', 2);
+  assert.equal(h.undo(doc).page, 2);
+  assert.equal(ids(doc, 1), 'a');
+  assert.equal(ids(doc, 2), '');
+  assert.equal(h.redo(doc).page, 2);
 
-  for (let i = 0; i < 20; i++) draw(h, strokes, 'z', 3);
+  for (let i = 0; i < 20; i++) draw(h, doc, 'z', 3);
   let steps = 0;
-  while (h.undo(strokes) !== null) steps++;
+  while (h.undo(doc) !== null) steps++;
   assert.equal(steps, 5);
 });
 
 test('undo steps are snapshots: later edits to the page do not leak into them', () => {
-  const h = createHistory(), strokes = {};
-  draw(h, strokes, 'a');
-  h.record(strokes, 1);
-  strokes[1][0].pts[0].x = 0.9; // a move, done in place
-  h.undo(strokes);
-  assert.equal(strokes[1][0].pts[0].x, 0.1);
+  const h = createHistory(), doc = newDoc();
+  draw(h, doc, 'a');
+  h.record(doc, 1);
+  doc.strokes[1][0].pts[0].x = 0.9; // a move, done in place
+  h.undo(doc);
+  assert.equal(doc.strokes[1][0].pts[0].x, 0.1);
 });
 
 /* ---------------------------------------------------------------- */

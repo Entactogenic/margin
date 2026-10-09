@@ -39,6 +39,10 @@ function exportsOf(src) {
 // dependency order: leaves first
 const MODULES = [
   'src/cleanup.js',
+  'src/pages.js',
+  'src/search.js',
+  'src/backup.js',
+  'src/tools/text.js',
   'src/tools/pencil.js',
   'src/tools/shapes.js',
   'src/tools/prefs.js',

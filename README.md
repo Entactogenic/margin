@@ -12,8 +12,17 @@ apps assume an Apple Pencil.
   and a thumbnail; reopen from the grid, sort, rename, delete
 - **Switch documents** with `Ctrl/Cmd + [` and `]`; each remembers its own
   zoom and scroll position, and the last three stay rendered in memory
+- **Notebooks and blank pages** — start a notebook with no PDF, or slip
+  plain, lined, grid or dotted pages between a PDF's own
+- **A margin** — extra writing space beside every page, for when the paper's
+  own margins are not enough
+- **Page thumbnails** — a sidebar of every page; tap one to jump there
+- **Search** — find text in the PDF and step through the matches
+- **Typed notes** — tap with the Text tool and type; exported as real text
+- **Backup** — the whole library, notes and all, as one file you can restore
 - **Write on any PDF** with pen, grainy pencil, highlighter, and an eraser that
-  removes whole strokes or just the part you rub out
+  removes whole strokes or just the part you rub out; a highlighter sweep
+  along a line of text snaps to cover that line exactly
 - **Place shapes** — box, ellipse, line, arrow; hold Shift for a square, a
   circle, or 45° steps
 - **Adaptive stroke width** — uses pressure if the hardware reports a real
@@ -143,6 +152,9 @@ src/
   library.js        library grid, sorting, the cache of open documents
   history.js        undo and redo
   gestures.js       multi-finger taps, resting-pen detection
+  pages.js          page layout: blank pages, margin, paper rulings
+  search.js         text search, snapping the highlighter to text lines
+  backup.js         the whole library as one file
   tools/
     pencil.js       grain tile and pencil rendering
     shapes.js       drag-to-place shapes
@@ -150,8 +162,13 @@ src/
     lasso.js        selecting strokes and transforming them
     scratch.js      telling a scratch-out from handwriting
     zoombox.js      zoom writing box geometry
+    text.js         typed notes
 tests/              node --test; storage tests use fake-indexeddb
 ```
+
+**Only pages near the viewport are rendered.** Every page has a placeholder
+of the right size; canvases come and go as it scrolls, so a 200-page PDF
+opens as fast as a 2-page one.
 
 **Strokes are stored in normalized page coordinates (0–1).** Zoom, resize
 and export all read the same data without refitting anything. Point widths
@@ -160,8 +177,10 @@ speed curve never retroactively changes ink already drawn.
 
 ## Known limitations
 
-- Rendering is per-page and eager; a 200-page PDF will be slow to open.
-  Virtualizing the page list is the obvious next step.
+- Typed notes export in the PDF's built-in Helvetica, which only covers
+  Western European characters. Others show on screen but export as "?".
+- A backup is assembled in memory, so it needs about as much free memory as
+  the library is large.
 - Export draws each stroke segment as a separate line. Faithful, but the
   file is larger than it needs to be; emitting real Bézier paths would fix it.
 - Pencil exports as lighter, semi-transparent ink. The grain is a screen
@@ -177,7 +196,6 @@ speed curve never retroactively changes ink already drawn.
   MyScript's iink SDK (commercial, excellent), or sending a rasterized
   selection to a vision model.
 - **Text search across notes** once handwriting recognition exists.
-- **Virtualized page rendering** for long documents.
 - **Per-stroke timestamps for replay** — the data is already captured.
 
 ## Licence

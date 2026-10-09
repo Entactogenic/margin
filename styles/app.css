@@ -109,6 +109,50 @@ input[type=range]{width:72px;accent-color:var(--accent);cursor:pointer;vertical-
 .empty .hint{font-family:var(--f-mono);font-size:.72rem;color:var(--soft)}
 .dragging{outline:2px dashed var(--accent);outline-offset:-10px}
 
+/* ---------------- pages sidebar ---------------- */
+.work{flex:1 1 auto;min-height:0;display:flex}
+.side{
+  flex:0 0 136px;min-height:0;display:flex;flex-direction:column;
+  background:var(--chrome);border-right:1px solid var(--rule);
+}
+.side-head{display:flex;flex-wrap:wrap;gap:.2rem;padding:.4rem;border-bottom:1px solid var(--rule)}
+.side-head .tb{font-size:.76rem;padding:.25rem .4rem}
+.side-head select,.lib-acts select,#find{
+  font:inherit;font-size:.8rem;color:var(--ink);background:var(--chrome);
+  border:1px solid var(--rule);border-radius:5px;padding:.26rem .35rem;
+}
+.side-head select{flex:1 1 100%}
+#side-list{
+  list-style:none;margin:0;padding:.6rem .4rem 1rem;flex:1 1 auto;overflow:auto;
+  display:flex;flex-direction:column;align-items:center;gap:.6rem;
+}
+#side-list li{position:relative}
+.pthumb{
+  display:flex;flex-direction:column;align-items:center;gap:.15rem;padding:0;border:0;background:none;
+  cursor:pointer;font-family:var(--f-mono);font-size:.66rem;color:var(--soft);border-radius:3px;
+}
+.pthumb canvas{display:block;background:#fff;border-radius:2px;box-shadow:0 1px 3px var(--shadow)}
+.pthumb[aria-current] canvas{box-shadow:0 0 0 2px var(--accent)}
+.pthumb[aria-current]{color:var(--ink)}
+.pthumb:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.pdel{
+  position:absolute;top:-7px;right:-9px;width:20px;height:20px;padding:0;line-height:1;
+  border-radius:50%;background:var(--chrome);border-color:var(--rule);font-size:.9rem;
+}
+
+/* ---------------- search ---------------- */
+#find{width:9rem}
+.hits{position:absolute;inset:0;z-index:1;pointer-events:none}
+.hit{position:absolute;border-radius:2px;background:rgba(255,200,0,.4);mix-blend-mode:multiply}
+.hit.cur{background:rgba(255,130,0,.5);outline:1.5px solid rgba(200,80,0,.9)}
+
+/* ---------------- text boxes ---------------- */
+.tedit{
+  position:absolute;z-index:3;margin:0;padding:0;border:0;resize:none;overflow:hidden;
+  background:rgba(255,255,255,.88);outline:1.5px dashed var(--accent);outline-offset:3px;
+  white-space:pre-wrap;overflow-wrap:break-word;
+}
+
 /* ---------------- zoom writing box ---------------- */
 .strip{
   --strip-h:clamp(170px,30vh,300px);
@@ -140,6 +184,7 @@ input[type=range]{width:72px;accent-color:var(--accent);cursor:pointer;vertical-
 .lib-head{display:flex;align-items:baseline;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem}
 .lib-head h2{font-size:1.1rem;font-weight:600;letter-spacing:-.01em;margin:0}
 .lib-storage[data-state="risk"]{color:var(--pen-2)}
+.lib-acts{display:flex;align-items:center;gap:.3rem;flex-wrap:wrap}
 .lib-sortby{font-size:.82rem;color:var(--soft);display:flex;align-items:center;gap:.4rem}
 .lib-sort{
   font:inherit;font-size:.82rem;color:var(--ink);background:var(--chrome);

@@ -11,6 +11,7 @@
  */
 
 import { paintPencil } from './tools/pencil.js';
+import { paintText } from './tools/text.js';
 
 export const pressureStats = { min: 1, max: 0, varied: false, samples: 0 };
 export const speedStats = { buf: [], fast: 0.0022, calibrated: false };
@@ -92,6 +93,10 @@ export function paintStroke(ctx, stroke, w, h, colorOf) {
   const pts = stroke.pts;
   if (!pts || pts.length < 2) return;
 
+  if (stroke.k === 'text') {
+    paintText(ctx, stroke, w, h, colorOf(stroke.c));
+    return;
+  }
   if (stroke.k === 'pencil') {
     paintPencil(ctx, stroke, w, h, colorOf(stroke.c));
     return;
@@ -106,6 +111,8 @@ export function paintStroke(ctx, stroke, w, h, colorOf) {
     // highlighter: one constant-width pass, multiplied so text shows through
     ctx.globalAlpha = 0.34;
     ctx.globalCompositeOperation = 'multiply';
+    // a highlight snapped to a line of text is a clean band, square at the ends
+    if (stroke.flat) ctx.lineCap = 'butt';
     ctx.lineWidth = stroke.w * w;
     ctx.beginPath();
     ctx.moveTo(pts[0].x * w, pts[0].y * h);
@@ -195,6 +202,7 @@ function densify(pts, step) {
 export function eraseArea(stroke, pt, radius = ERASE_RADIUS) {
   const pts = stroke.pts;
   if (!pts || pts.length < 2 || !touches(pts, pt, radius)) return null;
+  if (stroke.k === 'text') return []; // half a text box means nothing: it goes whole
 
   const r2 = radius * radius;
   const pieces = [];

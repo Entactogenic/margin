@@ -46,10 +46,13 @@ export function boundsOf(strokes) {
   return { x0, y0, x1, y1 };
 }
 
-/** The move (dx, dy), shortened if needed so the box stays on the page. */
-export function clampMove(box, dx, dy) {
+/**
+ * The move (dx, dy), shortened if needed so the box stays on the page.
+ * `xmax` is the page's right edge: 1, or more when it has a margin.
+ */
+export function clampMove(box, dx, dy, xmax = 1) {
   return {
-    dx: Math.min(1 - box.x1, Math.max(-box.x0, dx)),
+    dx: Math.min(xmax - box.x1, Math.max(-box.x0, dx)),
     dy: Math.min(1 - box.y1, Math.max(-box.y0, dy)),
   };
 }
@@ -60,10 +63,10 @@ export function clampMove(box, dx, dy) {
  * stretched one way only is never what was wanted — and the result is
  * limited so the selection neither vanishes nor leaves the page.
  */
-export function resizeScale(box, pt, { min = 0.2, max = 6 } = {}) {
+export function resizeScale(box, pt, { min = 0.2, max = 6, xmax = 1 } = {}) {
   const bw = Math.max(box.x1 - box.x0, 1e-6), bh = Math.max(box.y1 - box.y0, 1e-6);
   const wanted = Math.max((pt.x - box.x0) / bw, (pt.y - box.y0) / bh);
-  const fits = Math.min((1 - box.x0) / bw, (1 - box.y0) / bh);
+  const fits = Math.min((xmax - box.x0) / bw, (1 - box.y0) / bh);
   return Math.max(min, Math.min(wanted, fits, max));
 }
 
