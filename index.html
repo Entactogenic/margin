@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Margin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles/app.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+</head>
+<body>
+
+<div class="app">
+  <div class="bar">
+    <div class="grp">
+      <button class="tb" id="lib" aria-pressed="false" title="Documents kept in this browser">Library</button>
+      <label class="file">Open PDF<input type="file" id="file" accept="application/pdf"></label>
+    </div>
+
+    <div class="grp">
+      <button class="tb" id="t-pen" aria-pressed="true" title="Pen (1)">Pen</button>
+      <button class="tb" id="t-pencil" aria-pressed="false" title="Pencil (2)">Pencil</button>
+      <button class="tb" id="t-highlight" aria-pressed="false" title="Highlighter (3)">Highlight</button>
+      <button class="tb" id="t-shape" aria-pressed="false" title="Drag to place a shape; hold Shift to constrain (4)">Shape</button>
+      <button class="tb" id="t-erase" aria-pressed="false" title="Erase (5)">Erase</button>
+      <button class="tb" id="t-select" aria-pressed="false" title="Select a block of writing to level (6)">Select</button>
+    </div>
+
+    <div class="grp" id="opts" hidden></div>
+
+    <div class="grp" id="colors"></div>
+
+    <div class="grp" id="weight-grp">
+      <input type="range" id="weight" min="55" max="190" value="100" aria-label="Line weight">
+    </div>
+
+    <div class="grp">
+      <button class="tb" id="undo" disabled title="Undo (Ctrl/Cmd+Z)">Undo</button>
+    </div>
+
+    <div class="grp">
+      <button class="tb" id="tidy" title="Preview smoothing every stroke on this page">Tidy page</button>
+      <button class="tb" id="level" title="Preview levelling sloping handwriting on this page">Level</button>
+      <button class="tb" id="shapes" aria-pressed="false" title="Snap circles, boxes and lines as you draw">Snap shapes</button>
+    </div>
+
+    <div class="grp">
+      <button class="tb" id="zout" aria-label="Zoom out">&minus;</button>
+      <button class="tb" id="zin" aria-label="Zoom in">+</button>
+    </div>
+
+    <div class="grp">
+      <button class="tb" id="stylus" aria-pressed="false" title="Ignore finger and palm contacts">Stylus only</button>
+      <button class="tb" id="export" title="Save an annotated copy">Export</button>
+    </div>
+
+    <span class="spacer"></span>
+    <span class="stat" id="stat">no document</span>
+  </div>
+
+  <div class="main">
+    <div id="stage"></div>
+
+    <section class="library" id="library" aria-label="Library" hidden>
+      <header class="lib-head">
+        <h2>Library</h2>
+        <span class="stat lib-count"></span>
+        <span class="spacer"></span>
+        <label class="lib-sortby">Sort by
+          <select class="lib-sort">
+            <option value="opened">Last opened</option>
+            <option value="name">Name</option>
+            <option value="added">Date added</option>
+          </select>
+        </label>
+      </header>
+      <ul class="lib-grid"></ul>
+      <div class="lib-none" hidden>
+        <h3>No documents yet</h3>
+        <p>Choose <b>Open PDF</b>, or drop a PDF anywhere on this page. A copy is kept in this browser — nothing is uploaded — and it will be here, with your notes, next time.</p>
+      </div>
+    </section>
+
+    <div class="preview" id="preview" role="group" aria-label="Tidy preview" hidden>
+      <span class="pv-note">Preview — cleaned ink shown over the original</span>
+      <label>Strength <input type="range" id="pv-strength" min="0" max="100" value="70"></label>
+      <label><input type="checkbox" id="pv-level"> Level</label>
+      <label><input type="checkbox" id="pv-size"> Even size</label>
+      <label><input type="checkbox" id="pv-spacing"> Even spacing</label>
+      <span class="spacer"></span>
+      <button class="tb" id="pv-cancel" title="Cancel (Esc)">Cancel</button>
+      <button class="tb primary" id="pv-apply">Apply</button>
+    </div>
+  </div>
+</div>
+
+<div class="empty" id="empty">
+  <div class="box">
+    <h1>Margin</h1>
+    <p>Open a PDF and write on it. The document and your notes are kept in this browser and wait in the library for next time.</p>
+    <p class="hint">stroke width adapts to whatever your stylus reports</p>
+  </div>
+</div>
+
+<div class="scrim" id="dialog" hidden>
+  <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-body">
+    <h2 id="dlg-title"></h2>
+    <p id="dlg-body"></p>
+    <div class="dlg-acts">
+      <button class="tb" id="dlg-cancel">Cancel</button>
+      <button class="tb primary" id="dlg-ok">OK</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

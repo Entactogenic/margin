@@ -1,0 +1,17 @@
+{
+  "name": "margin",
+  "version": "0.2.0",
+  "description": "Browser-based PDF annotation with stylus-adaptive ink and handwriting cleanup",
+  "type": "module",
+  "scripts": {
+    "start": "npx --yes serve .",
+    "build": "node build.js",
+    "test": "node --test"
+  },
+  "keywords": ["pdf", "annotation", "stylus", "handwriting", "notes"],
+  "license": "MIT",
+  "private": true,
+  "devDependencies": {
+    "fake-indexeddb": "^6.0.0"
+  }
+}
