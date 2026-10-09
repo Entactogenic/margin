@@ -275,7 +275,8 @@ thumbs: key -> Blob                  // first-page PNG, ~320px wide
 
 ## Aim 4 — Feel like a native app
 
-**Status: Step 1 built, awaiting iPad testing. Steps 2–4 not started.**
+**Status: Step 1 done and confirmed on the iPad. Step 2 built, awaiting iPad
+testing. Steps 3–4 not started.**
 
 Make Margin feel like Notability or GoodNotes on an iPad: the pen draws, fingers
 scroll and pinch, and nothing lags or loses work.
@@ -288,7 +289,7 @@ measured behaviour.
 An installable web app (4.1d) is not the "native iOS or Android app" ruled out
 under Non-goals: it is the same static site, added to the Home Screen.
 
-### Step 1 — Fix what feels broken — *built, awaiting iPad testing*
+### Step 1 — Fix what feels broken — *done, confirmed on the iPad*
 
 #### 4.1a Finger scrolling
 
@@ -338,27 +339,77 @@ carries no manifest or service worker.
    7 days without a visit unless it is on the Home Screen — the note says so
    when the library is at risk.
 
-### Step 2 — Feel upgrades — *not started*
+### Step 2 — Feel upgrades — *built, awaiting iPad testing*
 
-- **4.2a Gestures.** Two-finger tap = undo, three-finger tap = redo. Needs a
-  redo stack; there is none yet. *Accept:* a tap is distinguished from a
-  two-finger scroll or pinch; redo is cleared by any new edit; both survive a
-  document switch.
-- **4.2b Lasso.** Circle strokes, then move, resize, recolor, copy, or delete
-  them. Keep "level" available on a selection. *Accept:* each action is one
-  undo step and survives reload and export; the lasso selects what it encloses
-  and nothing else.
-- **4.2c Hold-to-snap.** If the pen rests about 500ms at the end of a stroke,
-  run `recognize()` and replace the stroke with the clean shape. Remove the
-  *Snap shapes* toggle once this works. *Accept:* never fires on a stroke
-  ended without a pause; undo restores the freehand stroke.
-- **4.2d Scratch-out.** A fast back-and-forth scribble deletes the strokes
-  under it. *Accept:* fires on a deliberate scribble; **does not fire on any
-  stroke of a handwriting-like test set**; one undo step restores everything.
-- **4.2e Zoom writing box.** A magnified strip at the bottom of the screen;
-  ink written large lands small at a chosen spot on the page. *Accept:* ink
-  lands within a pixel of where the target box says it will; strokes are
-  stored in normalized page coordinates like any other.
+#### 4.2a Undo and redo gestures
+
+`src/history.js` holds each document's undo and redo stacks.
+`createTapDetector()` in `src/gestures.js` recognises the taps.
+
+1. Two fingers tapped together undo; three redo. A toast says which.
+2. A two-finger scroll, a pinch, fingers held down, and fingers that land one
+   after another are not taps.
+3. With stylus-only off, the finger that lands first has started a stroke; when
+   the second lands that stroke is taken back, so the tap leaves no ink.
+4. Any new edit clears redo. A pen tap that leaves no ink does not.
+5. Redo is also on a toolbar button, `Ctrl/Cmd+Shift+Z`, and `Ctrl/Cmd+Y`.
+
+#### 4.2b Lasso
+
+Replaces the old rectangle *Select* tool. Geometry is in `src/tools/lasso.js`.
+
+1. A loop selects the strokes that are at least three-quarters inside it; a
+   stroke the loop merely cuts across is not taken.
+2. Drag the selection to move it; drag the corner handle to resize it about the
+   opposite corner. Resizing keeps proportions and scales ink weight with it.
+3. The bar offers recolor, level, copy and delete. Highlighter colours apply
+   only to highlighter strokes, ink colours only to ink.
+4. Every action is exactly one undo step, and survives reload and export.
+5. A selection never leaves the page. `Esc` or *Done* drops it; `Del` deletes.
+
+#### 4.2c Hold-to-snap
+
+The *Snap shapes* toggle is gone. `heldStill()` in `src/gestures.js` decides.
+
+1. Resting the pen about 500ms at the end of a stroke replaces it with the
+   shape `recognize()` finds, if it finds one.
+2. A stroke that ends without a pause is never snapped; nor is one that
+   `recognize()` does not recognise, however long the pen rests.
+3. The freehand stroke is its own undo step: one undo gives it back, a second
+   removes it.
+
+#### 4.2d Scratch-out
+
+`src/tools/scratch.js`. A stroke is a scratch-out when, projected onto its own
+long axis, it reverses at least four times, quickly, and is not a ring (a word
+circled several times). It then deletes the strokes lying mostly under it.
+
+1. Fires on a deliberate scribble at any angle, including one made of thin loops.
+2. **Never fires on any stroke in the handwriting-like set in
+   `tests/feel.test.mjs`**, at any writing speed. Add to that set whenever a
+   false positive is found on a real device.
+3. A scribble over empty paper, or a slow careful zigzag, stays as ink.
+4. Strokes that only pass through the scribbled area — a long underline, the
+   border of a shaded box — are left alone.
+5. One undo restores everything, and the toast says so.
+
+#### 4.2e Zoom writing box
+
+`src/tools/zoombox.js` for the geometry. The strip is a second input surface
+for the same page: `attachInput()` takes a mapping from strip to page, and
+everything after that is the ordinary stroke path.
+
+1. Ink written in the strip lands within a pixel of where the frame on the
+   page says it will, and is stored as an ordinary stroke.
+2. The strip magnifies 2.5x without stretching, and ink in it is drawn from
+   stroke data, so it stays sharp.
+3. Ink weight is judged by how fast the hand moved, not how fast the ink
+   crossed the page — writing large does not produce fat strokes.
+4. The frame can be dragged by its tab. Arrows step it left and right, with
+   overlap; writing up to the right edge and pausing steps it along; stepping
+   off the right edge, or the return arrow, starts the next line.
+5. Undo, the eraser, shapes and scratch-out all work in the strip. The box
+   survives a zoom or rotation and closes when the document changes.
 
 ### Step 3 — Document handling — *not started*
 

@@ -35,7 +35,7 @@
       <button class="tb" id="t-highlight" aria-pressed="false" title="Highlighter (3)">Highlight</button>
       <button class="tb" id="t-shape" aria-pressed="false" title="Drag to place a shape; hold Shift to constrain (4)">Shape</button>
       <button class="tb" id="t-erase" aria-pressed="false" title="Erase (5)">Erase</button>
-      <button class="tb" id="t-select" aria-pressed="false" title="Select a block of writing to level (6)">Select</button>
+      <button class="tb" id="t-select" aria-pressed="false" title="Circle strokes to move, resize, recolor, copy, level or delete them (6)">Lasso</button>
     </div>
 
     <div class="grp" id="opts" hidden></div>
@@ -47,13 +47,14 @@
     </div>
 
     <div class="grp">
-      <button class="tb" id="undo" disabled title="Undo (Ctrl/Cmd+Z)">Undo</button>
+      <button class="tb" id="undo" disabled title="Undo (Ctrl/Cmd+Z, or tap with two fingers)">Undo</button>
+      <button class="tb" id="redo" disabled title="Redo (Ctrl/Cmd+Shift+Z, or tap with three fingers)">Redo</button>
     </div>
 
     <div class="grp">
       <button class="tb" id="tidy" title="Preview smoothing every stroke on this page">Tidy page</button>
       <button class="tb" id="level" title="Preview levelling sloping handwriting on this page">Level</button>
-      <button class="tb" id="shapes" aria-pressed="false" title="Snap circles, boxes and lines as you draw">Snap shapes</button>
+      <button class="tb" id="zoombox" aria-pressed="false" title="Write large in a strip at the bottom; the ink lands small on the page">Zoom box</button>
     </div>
 
     <div class="grp">
@@ -70,8 +71,18 @@
     <span class="stat" id="stat">no document</span>
   </div>
 
-  <div class="main">
+  <div class="main" id="main">
     <div id="stage"></div>
+
+    <div class="strip" id="strip" hidden>
+      <canvas id="strip-canvas" aria-label="Zoom writing box"></canvas>
+      <div class="strip-side">
+        <button class="tb" id="strip-left" aria-label="Move the zoom box left">&larr;</button>
+        <button class="tb" id="strip-right" aria-label="Move the zoom box right">&rarr;</button>
+        <button class="tb" id="strip-line" aria-label="Move the zoom box to the next line">&crarr;</button>
+        <button class="tb" id="strip-close" aria-label="Close the zoom box">&times;</button>
+      </div>
+    </div>
 
     <section class="library" id="library" aria-label="Library" hidden>
       <header class="lib-head">
@@ -103,6 +114,16 @@
       <span class="spacer"></span>
       <button class="tb" id="pv-cancel" title="Cancel (Esc)">Cancel</button>
       <button class="tb primary" id="pv-apply">Apply</button>
+    </div>
+
+    <div class="preview" id="selbar" role="group" aria-label="Selection" hidden>
+      <span class="pv-note" id="sel-note"></span>
+      <span class="grp" id="sel-colors"></span>
+      <button class="tb" id="sel-level" title="Level these strokes onto one baseline">Level</button>
+      <button class="tb" id="sel-copy">Copy</button>
+      <button class="tb" id="sel-delete" title="Delete (Del)">Delete</button>
+      <span class="spacer"></span>
+      <button class="tb primary" id="sel-done" title="Done (Esc)">Done</button>
     </div>
   </div>
 </div>

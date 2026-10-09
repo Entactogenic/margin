@@ -75,7 +75,7 @@ label.file input{position:absolute;width:1px;height:1px;opacity:0;pointer-events
 input[type=range]{width:72px;accent-color:var(--accent);cursor:pointer;vertical-align:middle}
 
 /* ---------------- stage ---------------- */
-.main{flex:1 1 auto;min-height:0;position:relative;display:flex}
+.main{flex:1 1 auto;min-height:0;position:relative;display:flex;flex-direction:column}
 #stage{
   /* positioned, so a page's offsetTop is measured from the scrolled content;
      a stable gutter, so page width does not depend on whether there is a scrollbar */
@@ -108,6 +108,29 @@ input[type=range]{width:72px;accent-color:var(--accent);cursor:pointer;vertical-
 .empty p{color:var(--soft);margin:0 0 .5rem;font-size:.9rem}
 .empty .hint{font-family:var(--f-mono);font-size:.72rem;color:var(--soft)}
 .dragging{outline:2px dashed var(--accent);outline-offset:-10px}
+
+/* ---------------- zoom writing box ---------------- */
+.strip{
+  --strip-h:clamp(170px,30vh,300px);
+  flex:0 0 var(--strip-h);height:var(--strip-h);display:flex;
+  background:var(--chrome);border-top:2px solid var(--accent);
+}
+/* sized by the strip, not by its own pixel dimensions */
+.strip canvas{flex:1 1 0;width:0;min-width:0;height:100%;background:#fff;touch-action:none}
+.strip-side{display:flex;flex-direction:column;justify-content:center;gap:.15rem;padding:.3rem;border-left:1px solid var(--rule)}
+.strip-side .tb{font-size:1rem;padding:.3rem .6rem}
+/* where on the page the strip's ink lands */
+.zframe{
+  position:absolute;z-index:2;pointer-events:none;border-radius:2px;
+  border:1.5px solid var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent);
+}
+.zgrip{
+  pointer-events:auto;position:absolute;left:-1.5px;bottom:100%;width:38px;height:24px;padding:0;
+  border:0;border-radius:5px 5px 0 0;background:var(--accent);cursor:grab;touch-action:none;
+}
+.zgrip:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
+/* bars that float over the page sit above the strip while it is open */
+.main:has(.strip:not([hidden])) .preview{bottom:calc(clamp(170px,30vh,300px) + .9rem)}
 
 /* ---------------- library ---------------- */
 .library{
@@ -195,6 +218,7 @@ input[type=range]{width:72px;accent-color:var(--accent);cursor:pointer;vertical-
   font-size:.82rem;padding:.45rem .85rem;border-radius:6px;
   box-shadow:0 4px 14px var(--shadow);z-index:40;
   max-width:calc(100% - 32px);text-align:center;
+  pointer-events:none; /* never in the way of the bar it happens to cover */
 }
 @media (prefers-reduced-motion:no-preference){
   .toast{animation:rise .18s ease-out}

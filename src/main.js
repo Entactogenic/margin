@@ -14,6 +14,11 @@ import * as Store from './store.js';
 import { tidyPage, straighten, recognize, shapeToPoints, smooth } from './cleanup.js';
 import { stampPdf, download } from './export.js';
 import { initLibrary, createLru, cycleKey, sortDocs, formatSize, storageNote } from './library.js';
+import { createHistory } from './history.js';
+import { createTapDetector, heldStill, trimRest } from './gestures.js';
+import { strokesInLasso, boundsOf, clampMove, resizeScale, transformStrokes, recolorStrokes } from './tools/lasso.js';
+import { scratchOut, scratchTargets } from './tools/scratch.js';
+import { stripToPage, pageToStrip, targetFor, magnification, advance } from './tools/zoombox.js';
 import { pencilAlpha } from './tools/pencil.js';
 import { dragShape, dragLength } from './tools/shapes.js';
 import { loadPrefs, savePrefs, PALETTES, TOOLS, SHAPES } from './tools/prefs.js';
@@ -35,10 +40,13 @@ const state = {
   penSeen: false,     // has a stylus touched down this session?
   penDown: false,     // is a pen gesture in progress right now?
   lastPointer: '',    // pointerType of the most recent pointerdown
-  autoShapes: false,
   autoSmooth: true,
   preview: null,      // { rec, list, cleaned } while a tidy preview is open
-  cancelDrag: null,   // set while a shape or selection drag is in progress
+  cancelDrag: null,   // set while a shape, lasso or selection drag is in progress
+  gesture: false,     // is any pointer gesture in progress, on the page or in the zoom box?
+  abortFingerStroke: null, // set while a finger is drawing; a second finger calls it
+  selection: null,    // { rec, idx, box } — strokes held by the lasso
+  zoomBox: null,      // { rec, target, ... } while the zoom writing box is open
 };
 
 const KEEP_VIEWS = 3;
@@ -64,28 +72,34 @@ function colorOf(token) {
 }
 
 /* ---------------------------------------------------------------- */
-/* undo                                                              */
+/* undo and redo                                                     */
 /* ---------------------------------------------------------------- */
 
+/** Call before changing a page's strokes. */
 function pushUndo(v, pageNum) {
-  v.undo.push({
-    page: pageNum,
-    before: JSON.parse(JSON.stringify(v.strokes[pageNum] ?? [])),
-  });
-  if (v.undo.length > 60) v.undo.shift();
-  $('undo').disabled = false;
+  v.history.record(v.strokes, pageNum);
+  syncHistory();
 }
 
-function doUndo() {
+function syncHistory() {
+  const h = state.view?.history;
+  $('undo').disabled = !h?.canUndo;
+  $('redo').disabled = !h?.canRedo;
+}
+
+/** Undo (-1) or redo (+1). Returns whether there was anything to do. */
+function stepHistory(dir) {
   const v = state.view;
-  const step = v?.undo.pop();
-  if (!step) return;
+  if (!v || state.gesture) return false;
   closePreview(false);
-  v.strokes[step.page] = step.before;
-  const rec = v.pages.find((p) => p.num === step.page);
+  clearSelection(); // it holds stroke positions that are about to change
+  const page = dir < 0 ? v.history.undo(v.strokes) : v.history.redo(v.strokes);
+  if (page === null) return false;
+  const rec = v.pages.find((p) => p.num === page);
   if (rec) redraw(rec);
-  $('undo').disabled = v.undo.length === 0;
+  syncHistory();
   persist(v);
+  return true;
 }
 
 /* ---------------------------------------------------------------- */
@@ -103,7 +117,7 @@ function makeView(key, name, bytes, meta) {
     srcBytes: bytes,
     doc: null,
     strokes: {},            // pageNum -> Stroke[]
-    undo: [],               // { page, before: Stroke[] }
+    history: createHistory(),
     pages: [],              // render records
     scale: meta?.view?.scale ?? 1,
     scroll: meta?.view?.scroll ?? null,  // { page, at }; null = never scrolled, start at the top
@@ -123,6 +137,8 @@ async function loadView(key, name, bytes, meta) {
 
 /** Release everything a view holds. Its strokes are already persisted. */
 function dropView(v) {
+  if (state.zoomBox?.rec.view === v) closeZoomBox();
+  if (state.selection?.rec.view === v) clearSelection();
   v.gen++;
   v.ready = false;
   for (const rec of v.pages) freePage(rec);
@@ -166,6 +182,8 @@ async function activate(v) {
   closePreview(false);
   state.cancelDrag?.();
   if (prev === v) { library.hide(); return; }
+  clearSelection();
+  closeZoomBox();
   if (prev) {
     captureScroll(prev);
     saveViewState(prev);
@@ -210,14 +228,22 @@ function enqueue(job) {
 /* rendering                                                         */
 /* ---------------------------------------------------------------- */
 
-function redraw(rec) {
+/** Paint a page's ink from its stroke data, leaving out any strokes in `skip`. */
+function paintPage(rec, skip) {
   const { ctx, canvas, dpr, w, h, num } = rec;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   for (const s of rec.view.strokes[num] ?? []) {
-    Ink.paintStroke(ctx, s, w, h, colorOf);
+    if (!skip?.has(s)) Ink.paintStroke(ctx, s, w, h, colorOf);
   }
+}
+
+/** The page as it should look at rest: its ink, plus whatever is laid over it. */
+function redraw(rec) {
+  paintPage(rec);
+  if (state.selection?.rec === rec) drawSelectionBox(rec, state.selection.box);
+  if (state.zoomBox?.rec === rec) queueStrip();
 }
 
 async function renderView(v) {
@@ -280,9 +306,17 @@ async function renderView(v) {
     v.pages = recs;
     v.avail = avail;
     v.drawnScale = scale;
+    // a selection points at the old canvases; the zoom box moves to the new ones
+    if (state.selection?.rec.view === v) { state.selection = null; $('selbar').hidden = true; }
     v.el.replaceChildren(...recs.map((r) => r.wrap));
     old.forEach(freePage);
     recs.forEach(redraw);
+    const z = state.zoomBox;
+    if (z?.rec.view === v) {
+      const next = recs.find((r) => r.num === z.rec.num);
+      if (next) bindZoomBox(next, { cx: z.target.x + z.target.w / 2, cy: z.target.y + z.target.h / 2 });
+      else closeZoomBox();
+    }
     if (v === state.view) { restoreScroll(v); status(); }
     v.ready = true;
 
@@ -321,46 +355,76 @@ async function saveThumb(v, rec) {
 // same on a page with five strokes as on one with five hundred.
 const under = document.createElement('canvas');
 
-function attachInput(rec) {
-  const el = rec.canvas;
+const HOLD_CHECK_MS = 120;  // how often a stroke in progress is checked for a resting pen
+const REST_PX = 5;          // a resting pen still wanders this far
+
+/**
+ * Wire a surface up for ink on `rec`'s page.
+ *
+ * Normally the surface is the page's own ink canvas. The zoom box
+ * passes its strip instead: `toPage` maps a pointer event to page
+ * coordinates and `zoom` says how magnified the surface is, and from
+ * there on a stroke written in the strip is handled like any other.
+ */
+function attachInput(rec, surface = {}) {
   const v = rec.view;
+  const el = surface.el ?? rec.canvas;
+  const zoomOf = surface.zoom ?? (() => 1);
+  const toPage = surface.toPage ?? ((e) => {
+    const r = el.getBoundingClientRect();
+    return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+  });
+  const on = (type, fn, opts = {}) => el.addEventListener(type, fn, { ...opts, signal: surface.signal });
+
   let cur = null;       // freehand stroke in progress
-  let drag = null;      // shape or selection in progress: { tool, a, b, shift }
+  let drag = null;      // shape in progress: { a, b, shift }
+  let lasso = null;     // lasso path in progress
+  let xf = null;        // selection being moved or resized: { grab, from, box, base, out }
   let erasing = null;   // { undone } while the eraser is down
   let active = null;    // pointerId of the gesture in progress
   let settle = null;    // timer for the repaint that follows a pause in writing
+  let holdTimer = null; // checks a stroke in progress for a resting pen
 
-  const local = (e) => {
-    const r = el.getBoundingClientRect();
-    return {
-      x: (e.clientX - r.left) / r.width,
-      y: (e.clientY - r.top) / r.height,
-      p: e.pressure,
-      t: performance.now(),
-    };
-  };
-
+  const local = (e) => ({ ...toPage(e), p: e.pressure, t: performance.now() });
   const allowed = (e) => e.pointerType === 'pen' || !state.stylusOnly;
 
-  const snapshot = () => {
-    under.width = el.width;
-    under.height = el.height;
-    under.getContext('2d').drawImage(el, 0, 0);
+  // Width and pencil opacity come from pen speed across the page. Writing
+  // in the zoom box covers the page slowly for the same hand speed, so
+  // speed is measured as the hand moved, not as the ink landed.
+  const asWritten = (q) => {
+    const k = zoomOf();
+    return q && k !== 1 ? { ...q, x: q.x * k, y: q.y * k } : q;
   };
 
-  /** Repaint the snapshot, then `stroke` on top of it if there is one. */
-  const paintOver = (stroke) => {
+  const snapshot = () => {
+    under.width = rec.canvas.width;
+    under.height = rec.canvas.height;
+    under.getContext('2d').drawImage(rec.canvas, 0, 0);
+  };
+
+  /** Repaint the snapshot, then `strokes` on top of it. */
+  const paintOver = (...strokes) => {
     const { ctx, dpr, w, h } = rec;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, el.width, el.height);
+    ctx.clearRect(0, 0, rec.canvas.width, rec.canvas.height);
     ctx.drawImage(under, 0, 0);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    if (stroke) Ink.paintStroke(ctx, stroke, w, h, colorOf);
+    for (const s of strokes) if (s) Ink.paintStroke(ctx, s, w, h, colorOf);
+    stripLive(rec, strokes);
+  };
+
+  const release = () => {
+    active = null;
+    clearInterval(holdTimer);
+    state.gesture = false;
+    state.penDown = false;
+    state.cancelDrag = null;
+    state.abortFingerStroke = null;
   };
 
   const shapeStroke = (d) => {
     const aspect = rec.w / rec.h;
-    if (dragLength(d.a, d.b, aspect) < 0.006) return null; // a tap, not a drag
+    if (dragLength(d.a, d.b, aspect) * zoomOf() < 0.006) return null; // a tap, not a drag
     const ink = state.prefs.ink.shape;
     const w = BASE_WIDTH.shape * ink.w;
     const kind = state.prefs.shape;
@@ -368,19 +432,77 @@ function attachInput(rec) {
     return { k: 'pen', shape: kind, c: ink.c, w, pts: pts.map((p) => ({ x: p.x, y: p.y, w })) };
   };
 
-  const paintDrag = () => {
-    if (drag.tool === 'shape') { paintOver(shapeStroke(drag)); return; }
-    paintOver(null);
+  const paintLasso = () => {
+    paintOver();
     const { ctx, w, h } = rec;
     ctx.save();
     ctx.strokeStyle = colorOf('--accent');
     ctx.setLineDash([5, 4]);
     ctx.lineWidth = 1.2;
-    ctx.strokeRect(
-      Math.min(drag.a.x, drag.b.x) * w, Math.min(drag.a.y, drag.b.y) * h,
-      Math.abs(drag.b.x - drag.a.x) * w, Math.abs(drag.b.y - drag.a.y) * h
-    );
+    ctx.beginPath();
+    lasso.forEach((p, i) => (i ? ctx.lineTo(p.x * w, p.y * h) : ctx.moveTo(p.x * w, p.y * h)));
+    ctx.stroke();
     ctx.restore();
+  };
+
+  const paintXf = () => {
+    const shown = xf.out ?? xf.base;
+    paintOver(...shown);
+    drawSelectionBox(rec, boundsOf(shown));
+  };
+
+  /** Lasso tool: grab the selection if the pen lands on it, else start a new loop. */
+  const startSelect = (pt) => {
+    const sel = state.selection?.rec === rec ? state.selection : null;
+    const grab = sel && selectionGrab(sel.box, pt, rec);
+    if (grab) {
+      const list = v.strokes[rec.num];
+      xf = { grab, from: pt, box: sel.box, base: sel.idx.map((i) => list[i]), out: null };
+      // the snapshot is the page without the selection, so it can be
+      // painted wherever it is dragged to
+      paintPage(rec, new Set(xf.base));
+      snapshot();
+      paintXf();
+    } else {
+      clearSelection();
+      snapshot();
+      lasso = [pt];
+    }
+    state.cancelDrag = () => { lasso = null; xf = null; release(); redraw(rec); };
+  };
+
+  /**
+   * Hold-to-snap: the pen has stopped at the end of a stroke. If what
+   * was drawn is recognisably a shape, it becomes one. The freehand
+   * stroke is kept as its own undo step, in case the guess is wrong.
+   */
+  const checkHold = () => {
+    if (!cur || cur.shape || cur.held) return;
+    const radius = REST_PX / rec.w / zoomOf();
+    if (!heldStill(cur.pts, performance.now(), { radius })) return;
+    cur.held = true; // one attempt per stroke
+    const drawn = trimRest(cur.pts, radius);
+    const shape = recognize(drawn, { strict: false });
+    const pts = shape && shapeToPoints(shape);
+    if (!pts) return;
+
+    cur.pts = drawn;
+    pushUndo(v, rec.num);
+    cur.shape = shape.type;
+    cur.pts = pts.map((p) => ({ x: p.x, y: p.y, w: cur.w }));
+    paintOver(cur);
+  };
+
+  /** A second finger landed: this was the start of a tap or a pinch, not a stroke. */
+  const abortStroke = () => {
+    if (!cur) return;
+    const list = v.strokes[rec.num];
+    list.splice(list.indexOf(cur), 1);
+    v.history.discard();
+    cur = null;
+    release();
+    redraw(rec);
+    syncHistory();
   };
 
   // Fingers scroll and pinch natively in stylus-only mode (see the
@@ -391,13 +513,16 @@ function attachInput(rec) {
     const touchTypes = [...e.changedTouches].map((t) => t.touchType);
     if (Ink.inkOwnsTouch({ ...state, touchTypes })) e.preventDefault();
   };
-  el.addEventListener('touchstart', claimTouch, { passive: false });
-  el.addEventListener('touchmove', claimTouch, { passive: false });
+  on('touchstart', claimTouch, { passive: false });
+  on('touchmove', claimTouch, { passive: false });
 
-  el.addEventListener('pointerdown', (e) => {
-    if (!allowed(e) || state.preview || active !== null) return;
+  on('pointerdown', (e) => {
+    // one gesture at a time, across the page and the zoom box alike
+    if (!allowed(e) || state.preview || state.gesture) return;
     clearTimeout(settle);
+    surface.onStart?.();
     active = e.pointerId;
+    state.gesture = true;
     state.penDown = e.pointerType === 'pen';
     el.setPointerCapture(e.pointerId);
     Ink.notePressure(e.pressure);
@@ -410,12 +535,13 @@ function attachInput(rec) {
       eraseAt(rec, pt, erasing);
       return;
     }
+    if (tool === 'select') { startSelect(pt); return; }
 
     snapshot();
 
-    if (tool === 'select' || tool === 'shape') {
-      drag = { tool, a: pt, b: pt, shift: e.shiftKey };
-      state.cancelDrag = () => { drag = null; active = null; state.penDown = false; state.cancelDrag = null; redraw(rec); };
+    if (tool === 'shape') {
+      drag = { a: pt, b: pt, shift: e.shiftKey };
+      state.cancelDrag = () => { drag = null; release(); redraw(rec); };
       return;
     }
 
@@ -427,104 +553,138 @@ function attachInput(rec) {
       w: BASE_WIDTH[tool] * ink.w,
       pts: [pt],
     };
-    if (cur.k === 'pencil') pt.a = pencilAlpha(pt, null, Ink.speedStats.fast);
+    if (cur.k === 'pencil') pt.a = pencilAlpha(asWritten(pt), null, Ink.speedStats.fast);
     (v.strokes[rec.num] ??= []).push(cur);
+    if (e.pointerType === 'touch') state.abortFingerStroke = abortStroke;
+    holdTimer = setInterval(checkHold, HOLD_CHECK_MS);
   });
 
-  el.addEventListener('pointermove', (e) => {
+  on('pointermove', (e) => {
     if (e.pointerId !== active) return; // a resting palm, not the gesture
+    e.preventDefault();
     if (erasing) {
       const batch = e.getCoalescedEvents?.() ?? [];
       for (const ev of (batch.length ? batch : [e])) eraseAt(rec, local(ev), erasing);
-      e.preventDefault();
       return;
     }
     if (drag) {
       drag.b = local(e);
       drag.shift = e.shiftKey;
-      paintDrag();
-      e.preventDefault();
+      paintOver(shapeStroke(drag));
       return;
     }
-    if (!cur) return;
+    if (lasso) {
+      lasso.push(local(e));
+      paintLasso();
+      return;
+    }
+    if (xf) {
+      xf.out = transformStrokes(xf.base, selectionTransform(xf, local(e)));
+      paintXf();
+      return;
+    }
+    if (!cur || cur.shape) return; // snapped: the shape is final until the pen lifts
 
     const batch = e.getCoalescedEvents?.() ?? [e];
     for (const ev of (batch.length ? batch : [e])) {
       Ink.notePressure(ev.pressure);
       const pt = local(ev);
       const prev = cur.pts[cur.pts.length - 1];
-      pt.w = Ink.widthFor(pt, prev, cur.w);
-      if (cur.k === 'pencil') pt.a = pencilAlpha(pt, prev, Ink.speedStats.fast);
+      pt.w = Ink.widthFor(asWritten(pt), asWritten(prev), cur.w);
+      if (cur.k === 'pencil') pt.a = pencilAlpha(asWritten(pt), asWritten(prev), Ink.speedStats.fast);
       cur.pts.push(pt);
     }
     paintOver(cur);
-    e.preventDefault();
   });
 
   const finish = (e, cancelled) => {
     // only the pointer that started the gesture may end it: a palm
     // lifting off mid-stroke must not cut the stroke short
     if (e.pointerId !== active) return;
-    active = null;
-    state.penDown = false;
+    release();
     if (erasing) { erasing = null; return; }
 
     if (drag) {
-      const d = drag;
+      const shape = cancelled ? null : shapeStroke(drag);
       drag = null;
-      state.cancelDrag = null;
-      if (!cancelled && d.tool === 'select') {
-        levelSelection(rec, {
-          x0: Math.min(d.a.x, d.b.x), x1: Math.max(d.a.x, d.b.x),
-          y0: Math.min(d.a.y, d.b.y), y1: Math.max(d.a.y, d.b.y),
-        });
-      }
-      const shape = !cancelled && d.tool === 'shape' ? shapeStroke(d) : null;
       if (shape) {
         // one undo step for the shape, however long it was dragged about
         pushUndo(v, rec.num);
         (v.strokes[rec.num] ??= []).push(shape);
         persist(v);
       }
-      // a levelled selection moved existing strokes; anything else only added one
-      if (d.tool === 'select') redraw(rec); else paintOver(shape);
+      paintOver(shape);
+      stripCommit(rec, shape);
+      return;
+    }
+
+    if (lasso) {
+      const path = lasso;
+      lasso = null;
+      const idx = cancelled ? [] : strokesInLasso(v.strokes[rec.num] ?? [], path);
+      if (idx.length) setSelection(rec, idx); else redraw(rec);
+      return;
+    }
+
+    if (xf) {
+      const { out } = xf;
+      xf = null;
+      const sel = state.selection;
+      if (out && !cancelled && sel) {
+        pushUndo(v, rec.num);
+        const list = v.strokes[rec.num];
+        sel.idx.forEach((i, k) => { list[i] = out[k]; });
+        sel.box = boundsOf(out);
+        persist(v);
+      }
+      redraw(rec);
       return;
     }
 
     if (!cur) return;
     const list = v.strokes[rec.num];
     let done = cur;
-    if (cur.pts.length < 2) {
-      list.splice(list.indexOf(cur), 1);
-      v.undo.pop();
-      $('undo').disabled = v.undo.length === 0;
-      done = null;
-    } else {
-      // post-processing on stroke end
-      if (state.autoShapes) {
-        const shape = recognize(cur.pts);
-        const pts = shape && shapeToPoints(shape);
-        if (pts) {
-          cur.shape = shape.type;
-          cur.pts = pts.map((p) => ({ ...p, w: cur.w }));
-        }
-      } else if (state.autoSmooth && cur.k !== 'hi') {
-        cur.pts = smooth(cur.pts, 0.35);
-      }
-    }
     cur = null;
+
+    if (done.pts.length < 2) {
+      list.splice(list.indexOf(done), 1);
+      v.history.discard();
+      syncHistory();
+      done = null;
+    } else if (!done.shape) {
+      // Scratch-out: a fast scribble over existing ink deletes it. The
+      // undo step taken when the pen went down already holds the page as
+      // it was, so one undo brings everything back.
+      const k = zoomOf();
+      const hit = done.k === 'hi' ? null
+        : scratchOut(k === 1 ? done.pts : done.pts.map(asWritten), (rec.w / rec.h));
+      const box = hit && (k === 1 ? hit : { x0: hit.x0 / k, x1: hit.x1 / k, y0: hit.y0 / k, y1: hit.y1 / k });
+      const targets = box ? scratchTargets(list, box, done) : [];
+      if (targets.length) {
+        v.strokes[rec.num] = list.filter((s, i) => s !== done && !targets.includes(i));
+        toast(`scratched out ${targets.length} stroke${targets.length === 1 ? '' : 's'} — undo brings ${targets.length === 1 ? 'it' : 'them'} back`);
+        redraw(rec);
+        persist(v);
+        return;
+      }
+      if (state.autoSmooth && done.k !== 'hi') done.pts = smooth(done.pts, 0.35);
+    }
+    delete done?.held;
+
     // the finished stroke goes on top of the snapshot; the rest of the
     // page was not touched, so it is not repainted
     paintOver(done);
+    stripCommit(rec, done);
     // ...until the hand pauses. Then one full repaint from the stroke
     // data, so the canvas is always exactly what a reload would show.
-    settle = setTimeout(() => { if (active === null && rec.canvas.width) redraw(rec); }, 300);
+    settle = setTimeout(() => { if (!state.gesture && rec.canvas.width) redraw(rec); }, 300);
     persist(v);
     status();
+    if (done) surface.onStroke?.(done);
   };
 
-  el.addEventListener('pointerup', (e) => finish(e, false));
-  el.addEventListener('pointercancel', (e) => finish(e, true));
+  on('pointerup', (e) => finish(e, false));
+  on('pointercancel', (e) => finish(e, true));
 }
 
 /**
@@ -558,19 +718,287 @@ function eraseAt(rec, pt, gesture) {
   persist(v);
 }
 
-function levelSelection(rec, rect) {
-  const v = rec.view;
-  const list = v.strokes[rec.num];
-  if (!list?.length) return;
-  const idx = Ink.strokesInRect(list, rect);
-  if (idx.length < 2) return;
+/* ---------------------------------------------------------------- */
+/* lasso selection                                                   */
+/* ---------------------------------------------------------------- */
 
+const GRIP_PX = 18;   // reach of the resize handle
+const BOX_PAD = 6;    // breathing room between the ink and its outline
+
+/** What a pen landing at `pt` takes hold of: the resize handle, the selection, or nothing. */
+function selectionGrab(box, pt, rec) {
+  const px = (pt.x - box.x1) * rec.w, py = (pt.y - box.y1) * rec.h;
+  if (Math.hypot(px - BOX_PAD, py - BOX_PAD) <= GRIP_PX) return 'resize';
+  const padX = BOX_PAD / rec.w, padY = BOX_PAD / rec.h;
+  const inside = pt.x >= box.x0 - padX && pt.x <= box.x1 + padX && pt.y >= box.y0 - padY && pt.y <= box.y1 + padY;
+  return inside ? 'move' : null;
+}
+
+function selectionTransform(xf, pt) {
+  if (xf.grab === 'move') return clampMove(xf.box, pt.x - xf.from.x, pt.y - xf.from.y);
+  return { scale: resizeScale(xf.box, pt), ox: xf.box.x0, oy: xf.box.y0 };
+}
+
+function drawSelectionBox(rec, box) {
+  const { ctx, w, h } = rec;
+  const x = box.x0 * w - BOX_PAD, y = box.y0 * h - BOX_PAD;
+  const bw = (box.x1 - box.x0) * w + BOX_PAD * 2, bh = (box.y1 - box.y0) * h + BOX_PAD * 2;
+  ctx.save();
+  ctx.strokeStyle = colorOf('--accent');
+  ctx.lineWidth = 1.2;
+  ctx.setLineDash([5, 4]);
+  ctx.strokeRect(x, y, bw, bh);
+  ctx.setLineDash([]);
+  ctx.fillStyle = colorOf('--accent');
+  ctx.fillRect(x + bw - 5, y + bh - 5, 10, 10); // resize handle
+  ctx.restore();
+}
+
+function setSelection(rec, idx) {
+  const list = rec.view.strokes[rec.num];
+  state.selection = { rec, idx, box: boundsOf(idx.map((i) => list[i])) };
+  showSelectionBar();
+  redraw(rec);
+}
+
+function clearSelection() {
+  const sel = state.selection;
+  if (!sel) return;
+  state.selection = null;
+  $('selbar').hidden = true;
+  if (sel.rec.canvas.width) redraw(sel.rec);
+}
+
+function showSelectionBar() {
+  const { rec, idx } = state.selection;
+  const picked = idx.map((i) => rec.view.strokes[rec.num][i]);
+  $('sel-note').textContent = `${idx.length} stroke${idx.length === 1 ? '' : 's'} selected — drag to move, drag the corner to resize`;
+
+  // ink colours if there is ink, highlighter colours if there is highlighter
+  const tokens = [
+    ...(picked.some((s) => s.k !== 'hi') ? PALETTES.pen : []),
+    ...(picked.some((s) => s.k === 'hi') ? PALETTES.highlight : []),
+  ];
+  const host = $('sel-colors');
+  host.innerHTML = '';
+  for (const token of tokens) {
+    const b = document.createElement('button');
+    b.className = 'sw';
+    b.type = 'button';
+    b.style.background = colorOf(token);
+    b.setAttribute('aria-label', `recolor ${token.replace('--', '')}`);
+    b.addEventListener('click', () => editSelection((strokes) => recolorStrokes(strokes, token)));
+    host.append(b);
+  }
+  $('selbar').hidden = false;
+}
+
+/** Replace the selected strokes with `change(strokes)`, as one undo step. */
+function editSelection(change) {
+  const sel = state.selection;
+  if (!sel) return;
+  const { rec, idx } = sel;
+  const v = rec.view, list = v.strokes[rec.num];
   pushUndo(v, rec.num);
-  const subset = idx.map((i) => list[i]);
-  const levelled = straighten(subset, { asOneLine: true });
-  idx.forEach((i, k) => { list[i] = levelled[k]; });
+  const next = change(idx.map((i) => list[i]));
+  idx.forEach((i, k) => { list[i] = next[k]; });
+  sel.box = boundsOf(next);
   persist(v);
-  toast(`levelled ${idx.length} strokes`);
+  redraw(rec);
+}
+
+function copySelection() {
+  const sel = state.selection;
+  if (!sel) return;
+  const { rec, idx } = sel;
+  const v = rec.view, list = v.strokes[rec.num];
+  pushUndo(v, rec.num);
+  // set a little down and to the right, where there is room for it
+  const copies = transformStrokes(idx.map((i) => list[i]), clampMove(sel.box, 0.02, 0.02 * (rec.w / rec.h)));
+  const first = list.length;
+  list.push(...copies);
+  persist(v);
+  setSelection(rec, copies.map((_, k) => first + k)); // the copy is what is now held
+}
+
+function deleteSelection() {
+  const sel = state.selection;
+  if (!sel) return;
+  const { rec, idx } = sel;
+  const v = rec.view;
+  pushUndo(v, rec.num);
+  v.strokes[rec.num] = v.strokes[rec.num].filter((_, i) => !idx.includes(i));
+  persist(v);
+  clearSelection();
+}
+
+/* ---------------------------------------------------------------- */
+/* zoom writing box                                                  */
+/* ---------------------------------------------------------------- */
+
+const ZOOM_BOX = 2.5;      // how much larger the strip shows the page
+const ADVANCE_AT = 0.85;   // writing past this much of the strip moves it along
+const ADVANCE_MS = 700;    // ...once the pen has been up this long
+
+// the strip without the stroke in progress: the PDF and the finished ink
+const stripBase = document.createElement('canvas');
+let stripQueued = false;
+
+/** Scale and shift a strip context so page-pixel drawing lands magnified in the strip. */
+function stripTransform(g) {
+  const { rec, target } = state.zoomBox;
+  const k = magnification(target, $('strip-canvas').clientWidth, rec.w) * rec.dpr;
+  g.setTransform(k, 0, 0, k, -target.x * rec.w * k, -target.y * rec.h * k);
+}
+
+/** Repaint the strip from its base, with the strokes in progress on top. */
+function stripLive(rec, strokes = []) {
+  const z = state.zoomBox;
+  if (z?.rec !== rec) return;
+  const c = $('strip-canvas');
+  const g = c.getContext('2d');
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.drawImage(stripBase, 0, 0);
+  stripTransform(g);
+  for (const s of strokes) if (s) Ink.paintStroke(g, s, rec.w, rec.h, colorOf);
+}
+
+/** Add a finished stroke to the strip's base, so it stays put while the next is written. */
+function stripCommit(rec, stroke) {
+  if (!stroke || state.zoomBox?.rec !== rec) return;
+  const g = stripBase.getContext('2d');
+  stripTransform(g);
+  Ink.paintStroke(g, stroke, rec.w, rec.h, colorOf);
+}
+
+function rebuildStrip() {
+  stripQueued = false;
+  const z = state.zoomBox;
+  if (!z || !z.rec.canvas.width) return;
+  const { rec, target } = z;
+  const c = $('strip-canvas');
+  stripBase.width = c.width;
+  stripBase.height = c.height;
+  const g = stripBase.getContext('2d');
+  g.fillStyle = '#fff';
+  g.fillRect(0, 0, c.width, c.height);
+  const p = rec.pdfCanvas;
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(p, target.x * p.width, target.y * p.height, target.w * p.width, target.h * p.height, 0, 0, c.width, c.height);
+  // ink is painted from the stroke data, so it is sharp at any magnification
+  stripTransform(g);
+  for (const s of rec.view.strokes[rec.num] ?? []) Ink.paintStroke(g, s, rec.w, rec.h, colorOf);
+  stripLive(rec);
+}
+
+function queueStrip() {
+  if (stripQueued) return;
+  stripQueued = true;
+  requestAnimationFrame(rebuildStrip);
+}
+
+function openZoomBox() {
+  const rec = visiblePage();
+  if (!rec) { toast('open a document first'); return; }
+  clearSelection();
+  $('strip').hidden = false;
+  $('zoombox').setAttribute('aria-pressed', 'true');
+  state.zoomBox = { rec: null, target: null, abort: null, frame: null, timer: null };
+
+  // start at the left margin, level with the middle of what is on screen
+  const stage = $('stage');
+  const cy = (stage.scrollTop + stage.clientHeight / 2 - rec.wrap.offsetTop) / rec.wrap.offsetHeight;
+  bindZoomBox(rec, { cx: 0, cy: Math.min(1, Math.max(0, cy)) });
+}
+
+/** Attach the strip to a page, showing the part of it centred on (cx, cy). */
+function bindZoomBox(rec, { cx, cy }) {
+  const z = state.zoomBox;
+  z.abort?.abort();
+  z.frame?.remove();
+  clearTimeout(z.timer);
+
+  const c = $('strip-canvas');
+  c.width = Math.round(c.clientWidth * rec.dpr);
+  c.height = Math.round(c.clientHeight * rec.dpr);
+  z.rec = rec;
+  z.target = targetFor({ stripW: c.clientWidth, stripH: c.clientHeight, pageW: rec.w, pageH: rec.h, zoom: ZOOM_BOX, cx, cy });
+  z.abort = new AbortController();
+  const { signal } = z.abort;
+
+  // the outline on the page showing where the ink will land, with a tab to drag it by
+  z.frame = document.createElement('div');
+  z.frame.className = 'zframe';
+  const grip = document.createElement('button');
+  grip.className = 'zgrip';
+  grip.type = 'button';
+  grip.setAttribute('aria-label', 'Move the zoom box');
+  z.frame.append(grip);
+  rec.wrap.append(z.frame);
+
+  let hold = null; // where in the box the grip was taken, while dragging
+  grip.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    grip.setPointerCapture(e.pointerId);
+    const r = rec.wrap.getBoundingClientRect();
+    hold = { id: e.pointerId, dx: (e.clientX - r.left) / r.width - z.target.x, dy: (e.clientY - r.top) / r.height - z.target.y };
+  }, { signal });
+  grip.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== hold?.id) return;
+    const r = rec.wrap.getBoundingClientRect();
+    const { w, h } = z.target;
+    moveZoomBox({
+      w, h,
+      x: Math.min(1 - w, Math.max(0, (e.clientX - r.left) / r.width - hold.dx)),
+      y: Math.min(1 - h, Math.max(0, (e.clientY - r.top) / r.height - hold.dy)),
+    }, false);
+  }, { signal });
+  for (const type of ['pointerup', 'pointercancel']) {
+    grip.addEventListener(type, () => { hold = null; }, { signal });
+  }
+
+  attachInput(rec, {
+    el: c,
+    signal,
+    zoom: () => magnification(z.target, c.clientWidth, rec.w),
+    toPage: (e) => {
+      const r = c.getBoundingClientRect();
+      return stripToPage(z.target, (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height);
+    },
+    onStart: () => clearTimeout(z.timer),
+    // writing has reached the end of the strip: move along once the pen has paused
+    onStroke: (stroke) => {
+      const reach = Math.max(...stroke.pts.map((p) => pageToStrip(z.target, p.x, p.y).fx));
+      if (reach < ADVANCE_AT) return;
+      z.timer = setTimeout(() => { if (!state.gesture) moveZoomBox(advance(z.target, 'right')); }, ADVANCE_MS);
+    },
+  });
+
+  moveZoomBox(z.target);
+}
+
+function moveZoomBox(target, follow = true) {
+  const z = state.zoomBox;
+  if (!z) return;
+  clearTimeout(z.timer);
+  z.target = target;
+  Object.assign(z.frame.style, {
+    left: `${target.x * 100}%`, top: `${target.y * 100}%`,
+    width: `${target.w * 100}%`, height: `${target.h * 100}%`,
+  });
+  if (follow) z.frame.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  rebuildStrip();
+}
+
+function closeZoomBox() {
+  const z = state.zoomBox;
+  if (!z) return;
+  z.abort?.abort();
+  z.frame?.remove();
+  clearTimeout(z.timer);
+  state.zoomBox = null;
+  $('strip').hidden = true;
+  $('zoombox').setAttribute('aria-pressed', 'false');
 }
 
 /* ---------------------------------------------------------------- */
@@ -596,6 +1024,7 @@ function openPreview(preset) {
   if (!list?.length) { toast('nothing to tidy on this page'); return; }
 
   closePreview(false);
+  clearSelection();
   $('pv-strength').value = Math.round(preset.smoothStrength * 100);
   $('pv-level').checked = !!preset.level;
   $('pv-size').checked = !!preset.size;
@@ -733,7 +1162,7 @@ function status() {
 /** Bring everything outside the page in line with the open document. */
 function syncChrome() {
   const v = state.view;
-  $('undo').disabled = !v?.undo.length;
+  syncHistory();
   $('empty').hidden = !!v || library.visible;
   document.title = v ? `${v.title} — Margin` : 'Margin';
   status();
@@ -796,6 +1225,7 @@ function prefsChanged() {
 
 function setTool(t) {
   state.cancelDrag?.();
+  clearSelection();
   state.prefs.tool = t;
   for (const id of TOOLS) {
     $(`t-${id}`).setAttribute('aria-pressed', String(t === id));
@@ -939,7 +1369,34 @@ function init() {
     $(`t-${id}`).addEventListener('click', () => setTool(id));
   }
 
-  $('undo').addEventListener('click', doUndo);
+  $('undo').addEventListener('click', () => stepHistory(-1));
+  $('redo').addEventListener('click', () => stepHistory(1));
+
+  // two fingers tapped together undo, three redo — anywhere over the document
+  const tap = createTapDetector({
+    onTap: (fingers) => {
+      if (library.visible || !$('dialog').hidden) return;
+      if (stepHistory(fingers === 2 ? -1 : 1)) toast(fingers === 2 ? 'undo' : 'redo');
+    },
+  });
+  for (const [type, kind] of [['touchstart', 'start'], ['touchmove', 'move'], ['touchend', 'end'], ['touchcancel', 'cancel']]) {
+    $('main').addEventListener(type, (e) => {
+      // with stylus-only off the first finger has begun a stroke: take it back
+      if (kind === 'start' && e.touches.length > 1) state.abortFingerStroke?.();
+      tap(kind, [...e.touches].map((t) => ({ id: t.identifier, x: t.clientX, y: t.clientY, type: t.touchType })), e.timeStamp);
+    }, { passive: true });
+  }
+
+  $('sel-level').addEventListener('click', () => editSelection((strokes) => straighten(strokes, { asOneLine: true })));
+  $('sel-copy').addEventListener('click', copySelection);
+  $('sel-delete').addEventListener('click', deleteSelection);
+  $('sel-done').addEventListener('click', clearSelection);
+
+  $('zoombox').addEventListener('click', () => (state.zoomBox ? closeZoomBox() : openZoomBox()));
+  $('strip-close').addEventListener('click', closeZoomBox);
+  for (const step of ['left', 'right', 'line']) {
+    $(`strip-${step}`).addEventListener('click', () => moveZoomBox(advance(state.zoomBox.target, step)));
+  }
   $('zin').addEventListener('click', () => zoom(1.25));
   $('zout').addEventListener('click', () => zoom(1 / 1.25));
 
@@ -964,12 +1421,6 @@ function init() {
     toast('stylus detected — only the pen draws now; fingers scroll and pinch');
   }, true);
 
-  $('shapes').addEventListener('click', (e) => {
-    state.autoShapes = !state.autoShapes;
-    e.currentTarget.setAttribute('aria-pressed', String(state.autoShapes));
-    toast(state.autoShapes ? 'shapes snap on release' : 'shapes off');
-  });
-
   $('tidy').addEventListener('click', () => openPreview({ smoothStrength: 0.7 }));
   $('level').addEventListener('click', () => openPreview({ smoothStrength: 0.45, level: true }));
   for (const id of ['pv-strength', 'pv-level', 'pv-size', 'pv-spacing']) {
@@ -983,13 +1434,16 @@ function init() {
     if (e.key === 'Escape') {
       if (state.cancelDrag) state.cancelDrag();
       else if (state.preview) closePreview(false);
+      else if (state.selection) clearSelection();
       else if (library.visible && state.view) library.hide();
       return;
     }
     if (e.target.matches?.('input[type="text"], textarea, select')) return;
 
     const mod = e.metaKey || e.ctrlKey;
-    if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); doUndo(); return; }
+    if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); stepHistory(e.shiftKey ? 1 : -1); return; }
+    if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); stepHistory(1); return; }
+    if (state.selection && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); deleteSelection(); return; }
     if (mod && (e.code === 'BracketLeft' || e.code === 'BracketRight')) {
       e.preventDefault();
       enqueue(() => cycleDoc(e.code === 'BracketLeft' ? -1 : 1));

@@ -23,7 +23,15 @@ apps assume an Apple Pencil.
 - **Level** — rotates sloping lines of handwriting onto a level baseline
 - **Even size / even spacing** — pulls drifting letter heights and ragged
   gaps back toward the line's own average
-- **Snap shapes** — circles, rectangles and lines become clean geometry
+- **Hold to snap** — pause at the end of a circle, box or line and it becomes
+  clean geometry
+- **Lasso** — circle some ink, then move, resize, recolor, copy, level or
+  delete it
+- **Scratch out** — scribble quickly over ink to delete it
+- **Zoom box** — write large in a strip at the bottom; the ink lands small
+  where the frame sits on the page
+- **Undo and redo** — buttons, keys, or tap with two fingers to undo and
+  three to redo
 - **Stylus-only mode** — the pen draws, fingers scroll and pinch, palms are
   ignored; turns itself on the first time a stylus touches the page
 - **Installable and offline** — add it to the Home Screen and it opens
@@ -114,8 +122,8 @@ smoothing alone leaves the jitter in.
 
 **Shape recognition** is deliberately conservative — it returns `null` for
 anything it is not confident about. Replacing handwriting with a shape the
-user did not intend is far worse than leaving a scribble alone. Turn it on
-with *Snap shapes* only when drawing diagrams.
+user did not intend is far worse than leaving a scribble alone. It only runs
+when asked: rest the pen for half a second at the end of a stroke.
 
 **Levelling** caps its correction at 12°. A larger angle usually means the
 line grouping was wrong, and silently rotating someone's notes is worse than
@@ -133,10 +141,15 @@ src/
   store.js          IndexedDB: notes, docs, bytes, thumbs
   export.js         pdf-lib stamping
   library.js        library grid, sorting, the cache of open documents
+  history.js        undo and redo
+  gestures.js       multi-finger taps, resting-pen detection
   tools/
     pencil.js       grain tile and pencil rendering
     shapes.js       drag-to-place shapes
     prefs.js        per-tool settings in localStorage
+    lasso.js        selecting strokes and transforming them
+    scratch.js      telling a scratch-out from handwriting
+    zoombox.js      zoom writing box geometry
 tests/              node --test; storage tests use fake-indexeddb
 ```
 

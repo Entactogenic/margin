@@ -46,6 +46,11 @@ const MODULES = [
   'src/store.js',
   'src/export.js',
   'src/library.js',
+  'src/history.js',
+  'src/gestures.js',
+  'src/tools/lasso.js',
+  'src/tools/scratch.js',
+  'src/tools/zoombox.js',
 ];
 
 // modules that main.js imports as a namespace (`import * as X`)

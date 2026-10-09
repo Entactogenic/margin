@@ -17,7 +17,7 @@
  * file the app needs is missing from the list.
  */
 
-const VERSION = 'margin-v1';
+const VERSION = 'margin-v2';
 
 const SHELL = [
   './',
@@ -30,9 +30,14 @@ const SHELL = [
   'src/store.js',
   'src/export.js',
   'src/library.js',
+  'src/history.js',
+  'src/gestures.js',
   'src/tools/pencil.js',
   'src/tools/shapes.js',
   'src/tools/prefs.js',
+  'src/tools/lasso.js',
+  'src/tools/scratch.js',
+  'src/tools/zoombox.js',
   'icons/icon-180.png',
   'icons/icon-192.png',
   'icons/icon-512.png',
