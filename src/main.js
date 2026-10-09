@@ -13,7 +13,7 @@ import * as Ink from './ink.js';
 import * as Store from './store.js';
 import { tidyPage, straighten, recognize, shapeToPoints, smooth } from './cleanup.js';
 import { stampPdf, download } from './export.js';
-import { initLibrary, createLru, cycleKey, sortDocs, formatSize } from './library.js';
+import { initLibrary, createLru, cycleKey, sortDocs, formatSize, storageNote } from './library.js';
 import { pencilAlpha } from './tools/pencil.js';
 import { dragShape, dragLength } from './tools/shapes.js';
 import { loadPrefs, savePrefs, PALETTES, TOOLS, SHAPES } from './tools/prefs.js';
@@ -32,6 +32,9 @@ const state = {
   view: null,         // the open document, see makeView()
   prefs: loadPrefs(() => localStorage),
   stylusOnly: false,
+  penSeen: false,     // has a stylus touched down this session?
+  penDown: false,     // is a pen gesture in progress right now?
+  lastPointer: '',    // pointerType of the most recent pointerdown
   autoShapes: false,
   autoSmooth: true,
   preview: null,      // { rec, list, cleaned } while a tidy preview is open
@@ -103,7 +106,7 @@ function makeView(key, name, bytes, meta) {
     undo: [],               // { page, before: Stroke[] }
     pages: [],              // render records
     scale: meta?.view?.scale ?? 1,
-    scroll: meta?.view?.scroll ?? { page: 1, at: 0 },
+    scroll: meta?.view?.scroll ?? null,  // { page, at }; null = never scrolled, start at the top
     avail: 0, drawnScale: 0,          // what the pages were last rendered at
     gen: 0,                 // bumped to abandon a render in progress
     ready: false,           // laid out, so its scroll position means something
@@ -149,8 +152,8 @@ function captureScroll(v) {
 }
 
 function restoreScroll(v) {
-  const rec = v.pages.find((r) => r.num === v.scroll.page);
-  if (rec) $('stage').scrollTop = rec.wrap.offsetTop + v.scroll.at * rec.wrap.offsetHeight;
+  const rec = v.scroll && v.pages.find((r) => r.num === v.scroll.page);
+  $('stage').scrollTop = rec ? rec.wrap.offsetTop + v.scroll.at * rec.wrap.offsetHeight : 0;
 }
 
 function saveViewState(v) {
@@ -324,6 +327,8 @@ function attachInput(rec) {
   let cur = null;       // freehand stroke in progress
   let drag = null;      // shape or selection in progress: { tool, a, b, shift }
   let erasing = null;   // { undone } while the eraser is down
+  let active = null;    // pointerId of the gesture in progress
+  let settle = null;    // timer for the repaint that follows a pause in writing
 
   const local = (e) => {
     const r = el.getBoundingClientRect();
@@ -378,8 +383,22 @@ function attachInput(rec) {
     ctx.restore();
   };
 
+  // Fingers scroll and pinch natively in stylus-only mode (see the
+  // touch-action rule in app.css), but the browser would let the pen
+  // scroll too. Claiming the pen's touches here is what keeps it drawing.
+  const claimTouch = (e) => {
+    if (!e.cancelable) return;
+    const touchTypes = [...e.changedTouches].map((t) => t.touchType);
+    if (Ink.inkOwnsTouch({ ...state, touchTypes })) e.preventDefault();
+  };
+  el.addEventListener('touchstart', claimTouch, { passive: false });
+  el.addEventListener('touchmove', claimTouch, { passive: false });
+
   el.addEventListener('pointerdown', (e) => {
-    if (!allowed(e) || state.preview || cur || drag || erasing) return;
+    if (!allowed(e) || state.preview || active !== null) return;
+    clearTimeout(settle);
+    active = e.pointerId;
+    state.penDown = e.pointerType === 'pen';
     el.setPointerCapture(e.pointerId);
     Ink.notePressure(e.pressure);
     const pt = local(e);
@@ -396,7 +415,7 @@ function attachInput(rec) {
 
     if (tool === 'select' || tool === 'shape') {
       drag = { tool, a: pt, b: pt, shift: e.shiftKey };
-      state.cancelDrag = () => { drag = null; state.cancelDrag = null; redraw(rec); };
+      state.cancelDrag = () => { drag = null; active = null; state.penDown = false; state.cancelDrag = null; redraw(rec); };
       return;
     }
 
@@ -413,8 +432,8 @@ function attachInput(rec) {
   });
 
   el.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== active) return; // a resting palm, not the gesture
     if (erasing) {
-      if (!allowed(e)) return;
       const batch = e.getCoalescedEvents?.() ?? [];
       for (const ev of (batch.length ? batch : [e])) eraseAt(rec, local(ev), erasing);
       e.preventDefault();
@@ -442,7 +461,12 @@ function attachInput(rec) {
     e.preventDefault();
   });
 
-  const finish = (cancelled) => {
+  const finish = (e, cancelled) => {
+    // only the pointer that started the gesture may end it: a palm
+    // lifting off mid-stroke must not cut the stroke short
+    if (e.pointerId !== active) return;
+    active = null;
+    state.penDown = false;
     if (erasing) { erasing = null; return; }
 
     if (drag) {
@@ -462,16 +486,19 @@ function attachInput(rec) {
         (v.strokes[rec.num] ??= []).push(shape);
         persist(v);
       }
-      redraw(rec);
+      // a levelled selection moved existing strokes; anything else only added one
+      if (d.tool === 'select') redraw(rec); else paintOver(shape);
       return;
     }
 
     if (!cur) return;
     const list = v.strokes[rec.num];
+    let done = cur;
     if (cur.pts.length < 2) {
       list.splice(list.indexOf(cur), 1);
       v.undo.pop();
       $('undo').disabled = v.undo.length === 0;
+      done = null;
     } else {
       // post-processing on stroke end
       if (state.autoShapes) {
@@ -486,13 +513,18 @@ function attachInput(rec) {
       }
     }
     cur = null;
-    redraw(rec);
+    // the finished stroke goes on top of the snapshot; the rest of the
+    // page was not touched, so it is not repainted
+    paintOver(done);
+    // ...until the hand pauses. Then one full repaint from the stroke
+    // data, so the canvas is always exactly what a reload would show.
+    settle = setTimeout(() => { if (active === null && rec.canvas.width) redraw(rec); }, 300);
     persist(v);
     status();
   };
 
-  el.addEventListener('pointerup', () => finish(false));
-  el.addEventListener('pointercancel', () => finish(true));
+  el.addEventListener('pointerup', (e) => finish(e, false));
+  el.addEventListener('pointercancel', (e) => finish(e, true));
 }
 
 /**
@@ -771,6 +803,13 @@ function setTool(t) {
   prefsChanged();
 }
 
+/** In stylus-only mode fingers are handed back to the browser to scroll with. */
+function setStylusOnly(on) {
+  state.stylusOnly = on;
+  $('stylus').setAttribute('aria-pressed', String(on));
+  document.body.classList.toggle('stylus-only', on);
+}
+
 async function persist(v) {
   if (v?.key) await Store.save(v.key, v.strokes);
 }
@@ -911,10 +950,19 @@ function init() {
     savePrefs(() => localStorage, state.prefs);
   });
 
-  $('stylus').addEventListener('click', (e) => {
-    state.stylusOnly = !state.stylusOnly;
-    e.currentTarget.setAttribute('aria-pressed', String(state.stylusOnly));
-  });
+  $('stylus').addEventListener('click', () => setStylusOnly(!state.stylusOnly));
+
+  // Automatic palm rejection: the first pen contact of a session proves
+  // there is a stylus, so from then on fingers scroll instead of drawing.
+  // Once only — after that the toggle is the user's to set.
+  document.addEventListener('pointerdown', (e) => {
+    state.lastPointer = e.pointerType;
+    if (e.pointerType !== 'pen' || state.penSeen) return;
+    state.penSeen = true;
+    if (state.stylusOnly) return;
+    setStylusOnly(true);
+    toast('stylus detected — only the pen draws now; fingers scroll and pinch');
+  }, true);
 
   $('shapes').addEventListener('click', (e) => {
     state.autoShapes = !state.autoShapes;
@@ -1013,7 +1061,31 @@ function init() {
       return;
     }
     if (!state.view && (await Store.listDocs()).length) library.show();
+    showStorageNote();
   });
+
+  // installed copies work offline; the single-file build has no manifest and skips this
+  if ('serviceWorker' in navigator && document.querySelector('link[rel="manifest"]')) {
+    navigator.serviceWorker.register('sw.js').catch((err) => console.warn('offline support unavailable', err));
+  }
+}
+
+/**
+ * Ask the browser not to evict our storage, and say where things stand.
+ * Safari clears a site's storage after 7 days without a visit unless it
+ * has been added to the Home Screen — worth knowing before a week away.
+ */
+async function showStorageNote() {
+  let persisted = null;
+  try {
+    if (navigator.storage?.persist) persisted = await navigator.storage.persist();
+  } catch { /* leave it unknown */ }
+  const installed = window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true;
+  const note = storageNote(persisted, installed);
+  const el = $('lib-storage');
+  el.textContent = note.label;
+  el.title = note.detail;
+  el.dataset.state = note.state;
 }
 
 init();

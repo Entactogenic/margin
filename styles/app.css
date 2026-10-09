@@ -90,6 +90,9 @@ input[type=range]{width:72px;accent-color:var(--accent);cursor:pointer;vertical-
 }
 .pagewrap canvas{display:block}
 .pagewrap .ink{position:absolute;inset:0;touch-action:none}
+/* stylus-only: fingers go back to the browser to scroll and pinch with.
+   The pen is kept for ink by the touchstart handler in main.js. */
+.stylus-only .pagewrap .ink{touch-action:pan-x pan-y pinch-zoom}
 .pnum{
   position:absolute;left:0;top:100%;margin-top:.3rem;
   font-family:var(--f-mono);font-size:.66rem;color:var(--soft);
@@ -113,6 +116,7 @@ input[type=range]{width:72px;accent-color:var(--accent);cursor:pointer;vertical-
 }
 .lib-head{display:flex;align-items:baseline;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem}
 .lib-head h2{font-size:1.1rem;font-weight:600;letter-spacing:-.01em;margin:0}
+.lib-storage[data-state="risk"]{color:var(--pen-2)}
 .lib-sortby{font-size:.82rem;color:var(--soft);display:flex;align-items:center;gap:.4rem}
 .lib-sort{
   font:inherit;font-size:.82rem;color:var(--ink);background:var(--chrome);

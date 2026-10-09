@@ -62,6 +62,28 @@ export function widthMode() {
 }
 
 /* ------------------------------------------------------------------ */
+/* touch arbitration                                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Should a touch on the page be kept for ink, rather than left to the
+ * browser to scroll and pinch with?
+ *
+ *   - outside stylus-only mode everything draws, fingers included
+ *   - while the pen is down, every contact is the pen or a resting palm
+ *   - otherwise only the stylus is kept, and fingers scroll natively
+ *
+ * Safari labels each touch with a `touchType`. Where that is missing,
+ * the pointerdown that came just before the touch says what it was.
+ */
+export function inkOwnsTouch({ stylusOnly, penDown, touchTypes = [], lastPointer }) {
+  if (!stylusOnly || penDown) return true;
+  if (touchTypes.includes('stylus')) return true;
+  if (touchTypes.some(Boolean)) return false; // labelled, and none is a stylus
+  return lastPointer === 'pen';
+}
+
+/* ------------------------------------------------------------------ */
 /* rendering                                                           */
 /* ------------------------------------------------------------------ */
 

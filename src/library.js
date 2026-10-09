@@ -53,6 +53,34 @@ export function cycleKey(order, current, step) {
 }
 
 /**
+ * What to tell the user about whether the browser will keep their
+ * library. `persisted` is the answer from navigator.storage.persist(),
+ * or null where the browser cannot say.
+ */
+export function storageNote(persisted, installed) {
+  if (persisted === true) {
+    return { state: 'safe', label: 'storage protected', detail: 'This browser has agreed not to clear your documents and notes.' };
+  }
+  if (installed) {
+    return {
+      state: 'safe', label: 'installed',
+      detail: 'Installed to the Home Screen, so documents and notes are not cleared for being unused.',
+    };
+  }
+  if (persisted === false) {
+    return {
+      state: 'risk', label: 'storage not protected — add to Home Screen',
+      detail: 'The browser may clear documents and notes; Safari does after 7 days without a visit. ' +
+        'Add Margin to the Home Screen (Share, then Add to Home Screen) to keep them.',
+    };
+  }
+  return {
+    state: 'unknown', label: 'storage protection unknown',
+    detail: 'This browser does not report whether it may clear stored documents. Export anything you cannot lose.',
+  };
+}
+
+/**
  * A small least-recently-used cache. `touch` marks an entry as the most
  * recent and evicts whatever falls off the end, calling `onEvict` so
  * the owner can release what the entry holds.

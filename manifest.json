@@ -1,0 +1,16 @@
+{
+  "name": "Margin",
+  "short_name": "Margin",
+  "description": "Read and annotate PDFs with a stylus. Everything stays on this device.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#E5E8E5",
+  "theme_color": "#F7F8F7",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

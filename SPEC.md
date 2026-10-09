@@ -273,13 +273,126 @@ thumbs: key -> Blob                  // first-page PNG, ~320px wide
 
 ---
 
+## Aim 4 — Feel like a native app
+
+**Status: Step 1 built, awaiting iPad testing. Steps 2–4 not started.**
+
+Make Margin feel like Notability or GoodNotes on an iPad: the pen draws, fingers
+scroll and pinch, and nothing lags or loses work.
+
+Built in four steps. **Stop after each step for testing on the iPad; do not
+start the next until the author confirms.** Every feature must survive save,
+reload, undo, and export, and every new pure function needs a test asserting
+measured behaviour.
+
+An installable web app (4.1d) is not the "native iOS or Android app" ruled out
+under Non-goals: it is the same static site, added to the Home Screen.
+
+### Step 1 — Fix what feels broken — *built, awaiting iPad testing*
+
+#### 4.1a Finger scrolling
+
+In stylus-only mode the ink canvas hands fingers back to the browser
+(`touch-action: pan-x pan-y pinch-zoom`), and a non-passive `touchstart` /
+`touchmove` handler keeps the pen's own touches for ink — without it the
+browser would let the pen scroll too. `inkOwnsTouch()` in `src/ink.js` makes
+the decision. With stylus-only off, fingers draw as before.
+
+1. Stylus-only on: a one-finger drag over a page scrolls it and leaves no ink.
+2. Stylus-only on: a two-finger pinch over a page zooms.
+3. Stylus-only on: the pen draws, and the page does not move under it.
+4. Stylus-only off: a finger draws, and the page does not scroll under it.
+5. A palm landing or lifting while the pen is down neither scrolls the page nor
+   cuts the stroke short.
+
+#### 4.1b Drawing performance
+
+Finished strokes are a cached bitmap (a snapshot of the ink canvas taken when
+the gesture starts); each move repaints that snapshot plus the one stroke in
+progress. A full repaint from stroke data happens only when the hand pauses.
+
+1. 60fps while drawing on a page that already holds 500 strokes.
+2. The cost of a pointermove does not depend on how many strokes the page has.
+3. After a pause the canvas is pixel-identical to a fresh repaint.
+
+#### 4.1c Automatic palm rejection
+
+1. The first `pointerType: "pen"` contact of a session turns stylus-only on and
+   shows a toast saying so. That first stroke still draws.
+2. It happens once per session: if the user then turns stylus-only off, further
+   pen contacts do not turn it back on.
+
+#### 4.1d Installable app
+
+`manifest.json`, `sw.js`, and `icons/`. The service worker precaches the app
+shell and the three pinned CDN files; `tests/pwa.test.mjs` fails if a file the
+app loads is missing from the precache list. **Bump `VERSION` in `sw.js`
+whenever the list of files changes.** The single-file build (`dist/margin.html`)
+carries no manifest or service worker.
+
+1. Installs to the iPad Home Screen and opens full-screen, without browser chrome.
+2. With no network: the app starts, a stored PDF opens and renders, and new ink
+   is saved.
+3. `navigator.storage.persist()` is called on launch, and the library header
+   says whether storage is protected. Safari clears a site's storage after
+   7 days without a visit unless it is on the Home Screen — the note says so
+   when the library is at risk.
+
+### Step 2 — Feel upgrades — *not started*
+
+- **4.2a Gestures.** Two-finger tap = undo, three-finger tap = redo. Needs a
+  redo stack; there is none yet. *Accept:* a tap is distinguished from a
+  two-finger scroll or pinch; redo is cleared by any new edit; both survive a
+  document switch.
+- **4.2b Lasso.** Circle strokes, then move, resize, recolor, copy, or delete
+  them. Keep "level" available on a selection. *Accept:* each action is one
+  undo step and survives reload and export; the lasso selects what it encloses
+  and nothing else.
+- **4.2c Hold-to-snap.** If the pen rests about 500ms at the end of a stroke,
+  run `recognize()` and replace the stroke with the clean shape. Remove the
+  *Snap shapes* toggle once this works. *Accept:* never fires on a stroke
+  ended without a pause; undo restores the freehand stroke.
+- **4.2d Scratch-out.** A fast back-and-forth scribble deletes the strokes
+  under it. *Accept:* fires on a deliberate scribble; **does not fire on any
+  stroke of a handwriting-like test set**; one undo step restores everything.
+- **4.2e Zoom writing box.** A magnified strip at the bottom of the screen;
+  ink written large lands small at a chosen spot on the page. *Accept:* ink
+  lands within a pixel of where the target box says it will; strokes are
+  stored in normalized page coordinates like any other.
+
+### Step 3 — Document handling — *not started*
+
+- **4.3a** Page thumbnail sidebar with tap-to-jump.
+- **4.3b** Render only pages near the viewport, so a 200-page PDF opens quickly.
+- **4.3c** Blank pages and paper templates (lined, grid, dotted), insertable
+  between PDF pages or as standalone notebooks.
+- **4.3d** Extra margin space beside PDF pages for notes.
+- **4.3e** Text boxes for typed notes.
+- **4.3f** Search the PDF's text via the pdf.js text layer; highlighter snaps
+  to text lines.
+- **4.3g** Backup export and import: one file with all documents and notes.
+
+Acceptance criteria to be written when Step 3 starts. 4.3c–4.3e change what a
+page is and what an annotation is, so they need the storage schema settled
+first.
+
+### Step 4 — Later — *do not start without asking*
+
+- Audio recording synced to ink: tap a stroke to hear what was being said when
+  it was written. Points already store timestamps.
+- Predicted ink with `getPredictedEvents()` where the browser supports it.
+
+---
+
 ## Build order
 
-Aim 3a → 3b → 3c → 1a → 1b → 1c → 2a → 2b → 2c
+Aim 3a → 3b → 3c → 1a → 1b → 1c → 2a → 2b → 2c → 4.1 → 4.2 → 4.3
 
 Aim 3 comes first even though it is listed third: the library is the difference
 between a demo and something usable daily, and the storage schema is easier to
 get right before more stroke types exist.
+
+Aim 4 stops after each step for testing on the iPad.
 
 ---
 
@@ -300,6 +413,8 @@ get right before more stroke types exist.
 
 ```
 index.html              markup, CDN scripts
+manifest.json  sw.js    installable, offline             (Aim 4.1d)
+icons/                  Home Screen icons
 build.js                bundles to dist/margin.html (no server needed)
 styles/app.css          tokens and layout
 src/

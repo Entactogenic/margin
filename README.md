@@ -24,7 +24,10 @@ apps assume an Apple Pencil.
 - **Even size / even spacing** — pulls drifting letter heights and ragged
   gaps back toward the line's own average
 - **Snap shapes** — circles, rectangles and lines become clean geometry
-- **Stylus-only mode** — ignores finger and palm contacts
+- **Stylus-only mode** — the pen draws, fingers scroll and pinch, palms are
+  ignored; turns itself on the first time a stylus touches the page
+- **Installable and offline** — add it to the Home Screen and it opens
+  full-screen and works with no connection
 - **Export** — stamps your annotations into a real PDF that opens anywhere
 - **Automatic save** to IndexedDB, keyed by filename and size; each tool
   remembers its own colour and width
@@ -65,6 +68,15 @@ npm test             # node --test
 
 Serve it from a machine on the same network and open the LAN address on the
 tablet, or deploy to GitHub Pages (below) and open it from anywhere.
+
+**Install it.** In Safari: Share → *Add to Home Screen*. It then opens
+full-screen and works offline. This matters for more than convenience: Safari
+deletes a website's storage after 7 days without a visit, and a Home Screen
+app is exempt. The library header shows whether your storage is protected.
+
+Installing and offline use need HTTPS (GitHub Pages is fine) or `localhost`.
+A plain `http://192.168.x.x` LAN address will run the app but cannot install
+a service worker.
 
 ## Deploying to GitHub Pages
 

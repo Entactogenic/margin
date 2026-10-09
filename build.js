@@ -73,6 +73,8 @@ const css = read('styles/app.css');
 
 // replacement functions, so `$` sequences in the source are not expanded
 const html = read('index.html')
+  // one file cannot carry a manifest, icons or a service worker
+  .replace(/^<link rel="(manifest|apple-touch-icon|icon)"[^>]*>\r?\n/gm, '')
   .replace(/<link rel="stylesheet" href="styles\/app\.css">/, () => `<style>\n${css}\n</style>`)
   .replace(
     /<script type="module" src="src\/main\.js"><\/script>/,
