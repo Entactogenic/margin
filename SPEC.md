@@ -32,6 +32,10 @@ Do not build these. Do not add dependencies for them.
 - Real-time collaboration
 - A native iOS or Android app
 - Handwriting-to-text conversion (see Aim 2 — out of scope and why)
+- Audio recording of any kind, including audio synced to ink (tap a stroke to
+  hear what was said as it was written). Considered for Aim 4 and dropped; do
+  not propose it again. The per-point timestamps in stroke data stay — they
+  are not there for audio, and other features may use them.
 - A build step beyond the existing `build.js`; this stays a static site
 
 ---
@@ -518,8 +522,6 @@ most of it).
 
 ### Step 4 — Later — *do not start without asking*
 
-- Audio recording synced to ink: tap a stroke to hear what was being said when
-  it was written. Points already store timestamps.
 - Predicted ink with `getPredictedEvents()` where the browser supports it.
 
 ---
