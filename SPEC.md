@@ -279,8 +279,8 @@ thumbs: key -> Blob                  // first-page PNG, ~320px wide
 
 ## Aim 4 — Feel like a native app
 
-**Status: Steps 1 and 2 done and confirmed on the iPad. Step 3 built, awaiting
-iPad testing. Step 4 not started — ask first.**
+**Status: Steps 1 and 2 done and confirmed on the iPad. Steps 3 and 4 built,
+awaiting iPad testing.**
 
 Make Margin feel like Notability or GoodNotes on an iPad: the pen draws, fingers
 scroll and pinch, and nothing lags or loses work.
@@ -520,9 +520,33 @@ most of it).
 4. **Limit:** a backup is built in memory, so it needs roughly the library's
    size in free memory. Fine for hundreds of megabytes; not tested beyond.
 
-### Step 4 — Later — *do not start without asking*
+### Step 4 — Predicted ink — *built, awaiting iPad testing*
 
-- Predicted ink with `getPredictedEvents()` where the browser supports it.
+Started at the author's request. (Audio recording was also listed here; it was
+dropped and is now a Non-goal.)
+
+Where the browser supports `getPredictedEvents()`, a short tail is drawn beyond
+the last real point of a stroke in progress — where the pen is expected to be
+by the time the frame reaches the screen. `predictedTail()` in `src/ink.js`
+decides how much of the browser's guess is safe to draw.
+
+1. The tail is drawn ahead of the pen for pen and pencil, on the page and in
+   the zoom box, at the stroke's own weight.
+2. **Predicted points are never stored** and never fed to the width model: the
+   stroke data and the speed calibration are exactly what they would be
+   without prediction.
+3. The tail is trimmed: it stops where the guess doubles back on the stroke,
+   and reaches no further than about one and a half times what the pen really
+   covered in the last 16ms.
+4. Lifting the pen removes the tail at once, and the canvas afterwards is
+   pixel-identical to a fresh repaint.
+5. The highlighter gets no tail — its single translucent path would show the
+   join as a darker patch.
+6. Where the browser offers no predictions, nothing changes. The status line
+   reads "predicted ink" once a prediction has actually been drawn, so support
+   can be checked on a device at a glance.
+
+This narrows the latency gap noted below; it does not close it.
 
 ---
 

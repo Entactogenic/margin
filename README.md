@@ -25,6 +25,8 @@ apps assume an Apple Pencil.
   along a line of text snaps to cover that line exactly
 - **Place shapes** — box, ellipse, line, arrow; hold Shift for a square, a
   circle, or 45° steps
+- **Predicted ink** — where the browser predicts the pen's path, the stroke
+  is drawn a little ahead of it, so the ink trails the nib less
 - **Adaptive stroke width** — uses pressure if the hardware reports a real
   range, otherwise derives width from pen speed, calibrated to how you write
 - **Tidy page** — smooths shaky handwriting without flattening its character,
@@ -186,7 +188,8 @@ speed curve never retroactively changes ink already drawn.
 - Pencil exports as lighter, semi-transparent ink. The grain is a screen
   texture and has no vector equivalent.
 - Browser ink latency is roughly 30–60 ms against about 9 ms for a native
-  iPad app. That gap cannot be fully closed in a browser.
+  iPad app. Predicted ink hides part of that where the browser supports it;
+  the gap cannot be fully closed in a browser.
 - No handwriting-to-text conversion. That needs a model, not geometry —
   see below.
 

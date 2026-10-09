@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { strokeAt, eraseArea, strokesInRect, ERASE_RADIUS } from '../src/ink.js';
+import { strokeAt, eraseArea, strokesInRect, predictedTail, ERASE_RADIUS } from '../src/ink.js';
 import { grainTile, grainStats, pencilAlpha } from '../src/tools/pencil.js';
 import { dragShape, constrainEnd, dragLength } from '../src/tools/shapes.js';
 import { defaultPrefs, loadPrefs, savePrefs, SHAPES } from '../src/tools/prefs.js';
@@ -201,6 +201,70 @@ test('area erase cuts a gap in a sparse shape', () => {
   assert.equal(pieces.length, 2);
   assert.ok(box(pieces[0].pts).x1 < 0.5 && box(pieces[1].pts).x0 > 0.5);
   assert.ok(pieces.every((p) => p.shape === 'line'));
+});
+
+/* ---------------------------------------------------------------- */
+/* predicted ink                                                     */
+/* ---------------------------------------------------------------- */
+
+// a pen moving right at a steady 0.001 page widths per 4ms sample (a 240Hz digitizer)
+const steady = (n = 12) => Array.from({ length: n }, (_, i) => ({ x: 0.3 + i * 0.001, y: 0.5, t: i * 4 }));
+const beyond = (pts, steps, dx = 0.001, dy = 0) => {
+  const last = pts.at(-1);
+  return Array.from({ length: steps }, (_, i) => ({ x: last.x + dx * (i + 1), y: last.y + dy * (i + 1) }));
+};
+
+test('a prediction that continues the stroke is drawn, about a frame ahead', () => {
+  const pts = steady();
+  const tail = predictedTail(pts, beyond(pts, 4));
+  assert.equal(tail.length, 4);
+  assert.ok(tail.every((p, i) => Math.abs(p.x - (pts.at(-1).x + 0.001 * (i + 1))) < 1e-12 && p.y === 0.5));
+  // one frame at this speed is 0.004; the tail covers that and no more than half as much again
+  const reach = tail.at(-1).x - pts.at(-1).x;
+  assert.ok(reach >= 0.004 - 1e-12 && reach <= 0.006 + 1e-12, `reaches ${reach.toFixed(4)}`);
+});
+
+test('a prediction is cut where it runs further than the pen could have gone', () => {
+  const pts = steady();
+  const wild = beyond(pts, 6, 0.004); // six guesses, each four times the pen's real step
+  const tail = predictedTail(pts, wild);
+  assert.ok(tail.length <= 1, `kept ${tail.length} of 6`);
+  const reach = tail.length ? tail.at(-1).x - pts.at(-1).x : 0;
+  assert.ok(reach <= 0.006 + 1e-12);
+  assert.ok(predictedTail(pts, beyond(pts, 30)).length <= 6, 'and never more than a few points');
+});
+
+test('a prediction that doubles back on the stroke is not drawn', () => {
+  const pts = steady();
+  assert.deepEqual(predictedTail(pts, beyond(pts, 3, -0.001)), []);
+  // good for two points, then it turns round: keep the two
+  const last = pts.at(-1);
+  const turns = [{ x: last.x + 0.001, y: 0.5 }, { x: last.x + 0.002, y: 0.5 }, { x: last.x + 0.001, y: 0.5 }];
+  assert.equal(predictedTail(pts, turns).length, 2);
+});
+
+test('a prediction is not drawn from a pen that is not moving, or a stroke just begun', () => {
+  const still = Array.from({ length: 10 }, (_, i) => ({ x: 0.3, y: 0.5, t: i * 4 }));
+  assert.deepEqual(predictedTail(still, [{ x: 0.31, y: 0.5 }]), []);
+  assert.deepEqual(predictedTail([{ x: 0.3, y: 0.5, t: 0 }], [{ x: 0.31, y: 0.5 }]), []);
+  assert.deepEqual(predictedTail(steady(), []), []);
+});
+
+test('the tail follows a curve, and reaches further when the pen is faster', () => {
+  const arc = Array.from({ length: 12 }, (_, i) => ({ x: 0.3 + 0.05 * Math.sin(i * 0.1), y: 0.5 - 0.05 * Math.cos(i * 0.1), t: i * 4 }));
+  const next = [12, 13, 14].map((i) => ({ x: 0.3 + 0.05 * Math.sin(i * 0.1), y: 0.5 - 0.05 * Math.cos(i * 0.1) }));
+  assert.equal(predictedTail(arc, next).length, 3);
+
+  const slow = steady(), fast = steady().map((p) => ({ ...p, x: 0.3 + (p.x - 0.3) * 5 }));
+  const far = (pts) => { const t = predictedTail(pts, beyond(pts, 6, 0.004)); return t.length ? t.at(-1).x - pts.at(-1).x : 0; };
+  assert.ok(far(fast) > far(slow));
+});
+
+test('predicting leaves the stroke itself untouched', () => {
+  const pts = steady();
+  const before = JSON.stringify(pts);
+  predictedTail(pts, beyond(pts, 4));
+  assert.equal(JSON.stringify(pts), before);
 });
 
 /* ---------------------------------------------------------------- */

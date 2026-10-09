@@ -42,6 +42,7 @@ const state = {
   prefs: loadPrefs(() => localStorage),
   stylusOnly: false,
   penSeen: false,     // has a stylus touched down this session?
+  predicting: false,  // has the browser supplied predicted pen positions this session?
   penDown: false,     // is a pen gesture in progress right now?
   lastPointer: '',    // pointerType of the most recent pointerdown
   autoSmooth: true,
@@ -591,6 +592,25 @@ function attachInput(rec, surface = {}) {
     stripLive(rec, strokes);
   };
 
+  /**
+   * Predicted ink: a short tail drawn beyond the last real point, where
+   * the browser expects the pen to be by the time this frame is shown.
+   * It is painted and thrown away — the next move repaints without it,
+   * and it never enters the stroke. Not for the highlighter, whose one
+   * translucent path would show the join as a darker patch.
+   */
+  const predictedInk = (e) => {
+    if (cur.k === 'hi') return null;
+    const ahead = e.getPredictedEvents?.() ?? [];
+    if (!ahead.length) return null;
+    const tail = Ink.predictedTail(cur.pts, ahead.map(toPage));
+    if (!tail.length) return null;
+    state.predicting = true;
+    const last = cur.pts[cur.pts.length - 1];
+    const w = last.w ?? cur.w; // the weight the stroke has now; guessing a speed would skew calibration
+    return { k: cur.k, c: cur.c, w: cur.w, pts: [last, ...tail.map((p) => ({ ...p, w, a: last.a }))] };
+  };
+
   const release = () => {
     active = null;
     clearInterval(holdTimer);
@@ -778,7 +798,7 @@ function attachInput(rec, surface = {}) {
       if (cur.k === 'pencil') pt.a = pencilAlpha(asWritten(pt), asWritten(prev), Ink.speedStats.fast);
       cur.pts.push(pt);
     }
-    paintOver(cur);
+    paintOver(cur, predictedInk(e));
   });
 
   const finish = (e, cancelled) => {
@@ -1803,7 +1823,7 @@ function status() {
   const v = state.view;
   if (!v) { $('stat').textContent = 'no document'; return; }
   $('stat').textContent =
-    `${v.title} · ${v.layout.order.length} pp · ${Math.round(v.scale * 100)}% · ${Ink.widthMode()}`;
+    `${v.title} · ${v.layout.order.length} pp · ${Math.round(v.scale * 100)}% · ${Ink.widthMode()}${state.predicting ? ' · predicted ink' : ''}`;
 }
 
 /** Bring everything outside the page in line with the open document. */

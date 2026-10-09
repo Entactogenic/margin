@@ -63,6 +63,54 @@ export function widthMode() {
 }
 
 /* ------------------------------------------------------------------ */
+/* predicted ink                                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The part of the browser's prediction that is safe to draw.
+ *
+ * getPredictedEvents() guesses where the pen will be by the time the
+ * frame reaches the screen, which hides most of a frame of latency. It
+ * also guesses wrong, worst of all at a sharp turn, where it carries
+ * straight on. So the prediction is kept only while it continues the
+ * way the pen has been going, and only about as far as the pen really
+ * travelled in the last frame's worth of time.
+ *
+ * `pts` is the stroke so far (with timestamps), `ahead` the predicted
+ * positions in page coordinates. Returns the points to draw beyond the
+ * last real one. They are for drawing only: never stored, and never
+ * fed to the width model.
+ */
+export function predictedTail(pts, ahead, { windowMs = 16, reach = 1.5, max = 6 } = {}) {
+  const n = pts.length;
+  if (n < 2 || !ahead.length) return [];
+  const last = pts[n - 1];
+
+  // how far, and which way, the pen went over the last frame
+  let i = n - 1, travel = 0;
+  while (i > 0 && (i === n - 1 || last.t - pts[i].t < windowMs)) {
+    travel += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+    i--;
+  }
+  const dx = last.x - pts[i].x, dy = last.y - pts[i].y;
+  if (travel < 1e-9) return [];
+
+  const out = [];
+  let from = last, gone = 0;
+  for (const p of ahead.slice(0, max)) {
+    const ex = p.x - from.x, ey = p.y - from.y;
+    const d = Math.hypot(ex, ey);
+    if (d === 0) continue;
+    if (ex * dx + ey * dy <= 0) break;       // doubles back on the stroke
+    if (gone + d > travel * reach) break;    // further than the pen could have got
+    gone += d;
+    out.push({ x: p.x, y: p.y });
+    from = p;
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------ */
 /* touch arbitration                                                   */
 /* ------------------------------------------------------------------ */
 
